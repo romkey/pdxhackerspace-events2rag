@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Protocol
 
-from sentence_transformers import SentenceTransformer
+import numpy as np
 
 
 class Embedder(Protocol):
@@ -15,18 +16,106 @@ class Embedder(Protocol):
         ...
 
 
-class SentenceTransformerEmbedder:
+class OnnxEmbedder:
+    """Lightweight embedder using ONNX Runtime + HuggingFace tokenizers."""
+
     def __init__(self, model_name: str) -> None:
+        from huggingface_hub import hf_hub_download
+        from onnxruntime import InferenceSession
+        from tokenizers import Tokenizer
+
+        model_dir = Path(
+            hf_hub_download(
+                repo_id=model_name,
+                filename="tokenizer.json",
+            )
+        ).parent
+
+        onnx_path = hf_hub_download(
+            repo_id=model_name,
+            filename="onnx/model.onnx",
+        )
+
+        self._tokenizer = Tokenizer.from_file(
+            str(model_dir / "tokenizer.json")
+        )
+        self._tokenizer.enable_padding()
+        self._tokenizer.enable_truncation(max_length=512)
+        self._session = InferenceSession(onnx_path)
+        self._dimension = self._detect_dimension()
+
+    def _detect_dimension(self) -> int:
+        dummy = self._tokenizer.encode("hello")
+        ids = np.array([[dummy.ids]], dtype=np.int64)
+        mask = np.array([[dummy.attention_mask]], dtype=np.int64)
+        token_type = np.zeros_like(ids)
+        outputs = self._session.run(
+            None,
+            {
+                "input_ids": ids[0],
+                "attention_mask": mask[0],
+                "token_type_ids": token_type[0],
+            },
+        )
+        return int(outputs[0].shape[-1])
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        encoded = self._tokenizer.encode_batch(list(texts))
+        ids = np.array([e.ids for e in encoded], dtype=np.int64)
+        mask = np.array(
+            [e.attention_mask for e in encoded], dtype=np.int64
+        )
+        token_type = np.zeros_like(ids)
+
+        outputs = self._session.run(
+            None,
+            {
+                "input_ids": ids,
+                "attention_mask": mask,
+                "token_type_ids": token_type,
+            },
+        )
+        embeddings = _mean_pool(outputs[0], mask)
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        norms = np.maximum(norms, 1e-12)
+        normalized = embeddings / norms
+        return normalized.tolist()
+
+    @property
+    def dimension(self) -> int:
+        return self._dimension
+
+
+class SentenceTransformerEmbedder:
+    """Full sentence-transformers backend (requires torch)."""
+
+    def __init__(self, model_name: str) -> None:
+        from sentence_transformers import SentenceTransformer
+
         self._model = SentenceTransformer(model_name)
         self._dimension = self._model.get_sentence_embedding_dimension()
         if self._dimension is None:
-            raise ValueError("Embedding model did not report a vector dimension")
+            raise ValueError(
+                "Embedding model did not report a vector dimension"
+            )
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        vectors = self._model.encode(list(texts), normalize_embeddings=True)
+        vectors = self._model.encode(
+            list(texts), normalize_embeddings=True
+        )
         return [vector.tolist() for vector in vectors]
 
     @property
     def dimension(self) -> int:
         return self._dimension
 
+
+def _mean_pool(
+    token_embeddings: np.ndarray, attention_mask: np.ndarray
+) -> np.ndarray:
+    mask_expanded = np.expand_dims(attention_mask, axis=-1).astype(
+        np.float32
+    )
+    summed = np.sum(token_embeddings * mask_expanded, axis=1)
+    counts = np.maximum(np.sum(mask_expanded, axis=1), 1e-9)
+    return summed / counts

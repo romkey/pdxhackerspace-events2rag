@@ -1,16 +1,21 @@
 Metadata-Version: 2.4
 Name: events2rag
-Version: 0.2.0
+Version: 0.3.0
 Summary: Ingest events JSON/ICS feeds and upsert vectors to Qdrant.
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
 Requires-Dist: python-dateutil>=2.9.0.post0
 Requires-Dist: requests>=2.32.0
 Requires-Dist: qdrant-client>=1.15.0
-Requires-Dist: sentence-transformers>=3.0.0
 Requires-Dist: icalendar>=6.1.0
 Requires-Dist: recurring-ical-events>=3.5.0
 Requires-Dist: beautifulsoup4>=4.12.0
+Requires-Dist: numpy>=1.26.0
+Requires-Dist: onnxruntime>=1.19.0
+Requires-Dist: tokenizers>=0.20.0
+Requires-Dist: huggingface-hub>=0.20.0
+Provides-Extra: torch
+Requires-Dist: sentence-transformers>=3.0.0; extra == "torch"
 Provides-Extra: dev
 Requires-Dist: pytest>=8.3.0; extra == "dev"
 Requires-Dist: pytest-mock>=3.14.0; extra == "dev"
@@ -26,7 +31,12 @@ Event feed ingester for RAG. It fetches a JSON event feed (and optional ICS feed
 - Polling loop that rescans every hour by default
 - JSON feed ingestion (`EVENTS_JSON_URL`)
 - Optional ICS ingestion with recurrence expansion (`EVENTS_ICS_URL`)
-- Qdrant collection creation and vector upsert
+- HTML stripping from event descriptions
+- Human-friendly dates with day-of-week in embeddings
+- Duration and temporal status (past/current/future) per occurrence
+- Event-level summaries with frequency estimation
+- Qdrant payload indexes for hybrid vector + filter search
+- Resilient polling loop that survives transient errors
 - Dockerized runtime
 - GitHub Actions for CI and Docker image publishing
 
@@ -81,14 +91,14 @@ docker compose -f docker-compose.dev.yml run --rm test
 Create and push a git tag:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 This publishes image tags like:
 
-- `ghcr.io/<owner>/<repo>:0.2.0`
-- `ghcr.io/<owner>/<repo>:0.1`
+- `ghcr.io/<owner>/<repo>:0.3.0`
+- `ghcr.io/<owner>/<repo>:0.3`
 - `ghcr.io/<owner>/<repo>:0`
 - `ghcr.io/<owner>/<repo>:latest`
 

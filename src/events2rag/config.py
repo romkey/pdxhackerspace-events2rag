@@ -13,6 +13,7 @@ class Settings:
     qdrant_api_key: str | None = None
     qdrant_collection: str = "events"
     qdrant_distance: str = "Cosine"
+    embedding_backend: str = "onnx"
     embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_batch_size: int = 64
     ics_lookback_days: int = 30
@@ -32,6 +33,9 @@ class Settings:
             qdrant_api_key=os.getenv("QDRANT_API_KEY") or None,
             qdrant_collection=os.getenv("QDRANT_COLLECTION", cls.qdrant_collection),
             qdrant_distance=os.getenv("QDRANT_DISTANCE", cls.qdrant_distance),
+            embedding_backend=os.getenv(
+                "EMBEDDING_BACKEND", cls.embedding_backend
+            ),
             embedding_model_name=os.getenv(
                 "EMBEDDING_MODEL_NAME", cls.embedding_model_name
             ),
