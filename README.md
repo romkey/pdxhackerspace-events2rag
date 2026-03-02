@@ -63,13 +63,13 @@ docker compose -f docker-compose.dev.yml run --rm test
 Create and push a git tag:
 
 ```bash
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 This publishes image tags like:
 
-- `ghcr.io/<owner>/<repo>:0.1.2`
+- `ghcr.io/<owner>/<repo>:0.2.0`
 - `ghcr.io/<owner>/<repo>:0.1`
 - `ghcr.io/<owner>/<repo>:0`
 - `ghcr.io/<owner>/<repo>:latest`

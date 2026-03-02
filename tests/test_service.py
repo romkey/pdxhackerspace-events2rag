@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from events2rag.config import Settings
-from events2rag.models import EventOccurrence
+from events2rag.models import EventOccurrence, EventSummary
 from events2rag.service import IngestionService
 
 
@@ -20,8 +20,10 @@ class FakeEmbedder:
 class FakeStore:
     def __init__(self) -> None:
         self.collection_size: int | None = None
-        self.upserted: list[EventOccurrence] = []
-        self.vectors: list[list[float]] = []
+        self.upserted_occurrences: list[EventOccurrence] = []
+        self.occurrence_vectors: list[list[float]] = []
+        self.upserted_summaries: list[EventSummary] = []
+        self.summary_vectors: list[list[float]] = []
 
     def ensure_collection(self, vector_size: int) -> None:
         self.collection_size = vector_size
@@ -29,12 +31,19 @@ class FakeStore:
     def upsert_occurrences(
         self, occurrences: list[EventOccurrence], vectors: list[list[float]]
     ) -> int:
-        self.upserted = list(occurrences)
-        self.vectors = list(vectors)
+        self.upserted_occurrences = list(occurrences)
+        self.occurrence_vectors = list(vectors)
         return len(occurrences)
 
+    def upsert_event_summaries(
+        self, summaries: list[EventSummary], vectors: list[list[float]]
+    ) -> int:
+        self.upserted_summaries = list(summaries)
+        self.summary_vectors = list(vectors)
+        return len(summaries)
 
-def test_run_cycle_dedupes_occurrences(mocker) -> None:
+
+def test_run_cycle_dedupes_occurrences_and_creates_summary(mocker) -> None:
     settings = Settings(events_json_url="https://example.com/events.json")
     now = datetime(2026, 3, 1, tzinfo=UTC)
     duplicate = EventOccurrence(
@@ -57,8 +66,10 @@ def test_run_cycle_dedupes_occurrences(mocker) -> None:
     service = IngestionService(settings=settings, store=store, embedder=FakeEmbedder())
 
     upserted = service.run_cycle()
-    assert upserted == 1
-    assert len(store.upserted) == 1
+    assert upserted == 2
+    assert len(store.upserted_occurrences) == 1
+    assert len(store.upserted_summaries) == 1
+    assert store.upserted_summaries[0].event_id == "event-1"
     assert store.collection_size == 3
 
 

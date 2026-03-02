@@ -7,7 +7,7 @@ from uuid import NAMESPACE_URL, uuid5
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
-from events2rag.models import EventOccurrence
+from events2rag.models import EventOccurrence, EventSummary
 
 DISTANCE_BY_NAME: dict[str, Distance] = {
     "Cosine": Distance.COSINE,
@@ -49,6 +49,7 @@ class QdrantStore:
                 id=_to_point_id(occurrence.occurrence_id),
                 vector=vector,
                 payload={
+                    "record_type": "occurrence",
                     "occurrence_id": occurrence.occurrence_id,
                     "event_id": occurrence.event_id,
                     "title": occurrence.title,
@@ -69,6 +70,41 @@ class QdrantStore:
                 },
             )
             for occurrence, vector in zip(occurrences, vectors, strict=True)
+        ]
+        self._client.upsert(collection_name=self._collection_name, points=points)
+        return len(points)
+
+    def upsert_event_summaries(
+        self, summaries: Sequence[EventSummary], vectors: Sequence[list[float]]
+    ) -> int:
+        if len(summaries) != len(vectors):
+            raise ValueError("summaries and vectors must have equal lengths")
+        now = datetime.now(tz=UTC).isoformat()
+        points = [
+            PointStruct(
+                id=_to_point_id(f"event:{summary.event_id}"),
+                vector=vector,
+                payload={
+                    "record_type": "event_summary",
+                    "event_id": summary.event_id,
+                    "title": summary.title,
+                    "description": summary.description,
+                    "next_start_time": summary.next_start_time.isoformat()
+                    if summary.next_start_time
+                    else None,
+                    "locations": summary.locations,
+                    "tags": summary.tags,
+                    "source_url": summary.source_url,
+                    "source_type": summary.source_type,
+                    "occurrence_count": summary.occurrence_count,
+                    "last_modified": summary.last_modified.isoformat()
+                    if summary.last_modified
+                    else None,
+                    "ingested_at": now,
+                    "embedding_text": summary.embedding_text(),
+                },
+            )
+            for summary, vector in zip(summaries, vectors, strict=True)
         ]
         self._client.upsert(collection_name=self._collection_name, points=points)
         return len(points)
