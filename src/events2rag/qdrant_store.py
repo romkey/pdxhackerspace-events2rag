@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from uuid import NAMESPACE_URL, uuid5
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -45,7 +46,7 @@ class QdrantStore:
         now = datetime.now(tz=UTC).isoformat()
         points = [
             PointStruct(
-                id=occurrence.occurrence_id,
+                id=_to_point_id(occurrence.occurrence_id),
                 vector=vector,
                 payload={
                     "occurrence_id": occurrence.occurrence_id,
@@ -71,4 +72,9 @@ class QdrantStore:
         ]
         self._client.upsert(collection_name=self._collection_name, points=points)
         return len(points)
+
+
+def _to_point_id(occurrence_id: str) -> str:
+    """Convert any occurrence key into a deterministic UUID for Qdrant."""
+    return str(uuid5(NAMESPACE_URL, occurrence_id))
 
