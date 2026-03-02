@@ -13,9 +13,10 @@ class Settings:
     qdrant_api_key: str | None = None
     qdrant_collection: str = "events"
     qdrant_distance: str = "Cosine"
-    embedding_backend: str = "onnx"
-    embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_backend: str = "ollama"
+    embedding_model_name: str = "qllama/bge-small-en-v1.5"
     embedding_batch_size: int = 64
+    ollama_url: str = "http://ollama:11434"
     ics_lookback_days: int = 30
     ics_lookahead_days: int = 365
     request_timeout_seconds: int = 30
@@ -24,15 +25,24 @@ class Settings:
     @classmethod
     def from_env(cls) -> Settings:
         return cls(
-            events_json_url=os.getenv("EVENTS_JSON_URL", cls.events_json_url),
+            events_json_url=os.getenv(
+                "EVENTS_JSON_URL", cls.events_json_url
+            ),
             events_ics_url=os.getenv("EVENTS_ICS_URL") or None,
             poll_interval_seconds=int(
-                os.getenv("POLL_INTERVAL_SECONDS", str(cls.poll_interval_seconds))
+                os.getenv(
+                    "POLL_INTERVAL_SECONDS",
+                    str(cls.poll_interval_seconds),
+                )
             ),
             qdrant_url=os.getenv("QDRANT_URL", cls.qdrant_url),
             qdrant_api_key=os.getenv("QDRANT_API_KEY") or None,
-            qdrant_collection=os.getenv("QDRANT_COLLECTION", cls.qdrant_collection),
-            qdrant_distance=os.getenv("QDRANT_DISTANCE", cls.qdrant_distance),
+            qdrant_collection=os.getenv(
+                "QDRANT_COLLECTION", cls.qdrant_collection
+            ),
+            qdrant_distance=os.getenv(
+                "QDRANT_DISTANCE", cls.qdrant_distance
+            ),
             embedding_backend=os.getenv(
                 "EMBEDDING_BACKEND", cls.embedding_backend
             ),
@@ -40,19 +50,27 @@ class Settings:
                 "EMBEDDING_MODEL_NAME", cls.embedding_model_name
             ),
             embedding_batch_size=int(
-                os.getenv("EMBEDDING_BATCH_SIZE", str(cls.embedding_batch_size))
+                os.getenv(
+                    "EMBEDDING_BATCH_SIZE",
+                    str(cls.embedding_batch_size),
+                )
             ),
+            ollama_url=os.getenv("OLLAMA_URL", cls.ollama_url),
             ics_lookback_days=int(
-                os.getenv("ICS_LOOKBACK_DAYS", str(cls.ics_lookback_days))
+                os.getenv(
+                    "ICS_LOOKBACK_DAYS", str(cls.ics_lookback_days)
+                )
             ),
             ics_lookahead_days=int(
-                os.getenv("ICS_LOOKAHEAD_DAYS", str(cls.ics_lookahead_days))
+                os.getenv(
+                    "ICS_LOOKAHEAD_DAYS", str(cls.ics_lookahead_days)
+                )
             ),
             request_timeout_seconds=int(
                 os.getenv(
-                    "REQUEST_TIMEOUT_SECONDS", str(cls.request_timeout_seconds)
+                    "REQUEST_TIMEOUT_SECONDS",
+                    str(cls.request_timeout_seconds),
                 )
             ),
             log_level=os.getenv("LOG_LEVEL", cls.log_level),
         )
-

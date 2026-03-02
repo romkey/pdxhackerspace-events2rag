@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from events2rag.config import Settings
-from events2rag.embedder import Embedder, OnnxEmbedder
+from events2rag.embedder import Embedder, OllamaEmbedder
 from events2rag.qdrant_store import QdrantStore
 from events2rag.service import IngestionService
 
@@ -16,11 +16,26 @@ def configure_logging(level: str) -> None:
 
 
 def build_embedder(settings: Settings) -> Embedder:
-    if settings.embedding_backend == "sentence-transformers":
+    backend = settings.embedding_backend
+
+    if backend == "ollama":
+        return OllamaEmbedder(
+            model_name=settings.embedding_model_name,
+            ollama_url=settings.ollama_url,
+            timeout=settings.request_timeout_seconds,
+        )
+
+    if backend == "onnx":
+        from events2rag.embedder import OnnxEmbedder
+
+        return OnnxEmbedder(settings.embedding_model_name)
+
+    if backend == "sentence-transformers":
         from events2rag.embedder import SentenceTransformerEmbedder
 
         return SentenceTransformerEmbedder(settings.embedding_model_name)
-    return OnnxEmbedder(settings.embedding_model_name)
+
+    raise ValueError(f"Unknown embedding backend: {backend!r}")
 
 
 def main() -> None:

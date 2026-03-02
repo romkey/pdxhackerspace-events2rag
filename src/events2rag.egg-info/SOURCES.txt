@@ -17,6 +17,7 @@ src/events2rag.egg-info/dependency_links.txt
 src/events2rag.egg-info/entry_points.txt
 src/events2rag.egg-info/requires.txt
 src/events2rag.egg-info/top_level.txt
+tests/test_embedder.py
 tests/test_json_feed.py
 tests/test_qdrant_store.py
 tests/test_service.py

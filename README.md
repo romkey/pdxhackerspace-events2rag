@@ -17,6 +17,14 @@ Event feed ingester for RAG. It fetches a JSON event feed (and optional ICS feed
 - Dockerized runtime
 - GitHub Actions for CI and Docker image publishing
 
+## Embedding backends
+
+| Backend | Install | Image size | Description |
+|---------|---------|------------|-------------|
+| `ollama` (default) | base | ~150 MB | Calls an external Ollama server |
+| `onnx` | `pip install .[onnx]` | ~350 MB | In-process ONNX Runtime |
+| `sentence-transformers` | `pip install .[torch]` | ~1+ GB | Full PyTorch stack |
+
 ## Configuration
 
 Copy `.env.example` to `.env` and update values.
@@ -28,7 +36,9 @@ Key variables:
 - `POLL_INTERVAL_SECONDS`: scan interval (default `3600`)
 - `QDRANT_URL`: Qdrant endpoint
 - `QDRANT_COLLECTION`: collection name
-- `EMBEDDING_MODEL_NAME`: sentence-transformers model
+- `EMBEDDING_BACKEND`: `ollama`, `onnx`, or `sentence-transformers`
+- `EMBEDDING_MODEL_NAME`: model name (default `qllama/bge-small-en-v1.5`)
+- `OLLAMA_URL`: Ollama endpoint (default `http://ollama:11434`)
 
 ## Run with Docker Compose
 
@@ -41,6 +51,8 @@ This starts:
 
 - `qdrant` on `localhost:6333`
 - `ingester` that fetches and upserts every hour
+
+The ingester expects Ollama to be reachable at `OLLAMA_URL`. If Ollama runs on the Docker host, use `http://host.docker.internal:11434` or add it to the compose network.
 
 ## Local development
 
@@ -68,14 +80,13 @@ docker compose -f docker-compose.dev.yml run --rm test
 Create and push a git tag:
 
 ```bash
-git tag v0.3.1
-git push origin v0.3.1
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 This publishes image tags like:
 
-- `ghcr.io/<owner>/<repo>:0.3.1`
-- `ghcr.io/<owner>/<repo>:0.3`
+- `ghcr.io/<owner>/<repo>:0.4.0`
+- `ghcr.io/<owner>/<repo>:0.4`
 - `ghcr.io/<owner>/<repo>:0`
 - `ghcr.io/<owner>/<repo>:latest`
-

@@ -1,6 +1,6 @@
 [project]
 name = "events2rag"
-version = "0.3.1"
+version = "0.4.0"
 description = "Ingest events JSON/ICS feeds and upsert vectors to Qdrant."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -10,14 +10,16 @@ dependencies = [
   "qdrant-client>=1.15.0",
   "icalendar>=6.1.0",
   "recurring-ical-events>=3.5.0",
-  "beautifulsoup4>=4.12.0",
+  "beautifulsoup4>=4.12.0"
+]
+
+[project.optional-dependencies]
+onnx = [
   "numpy>=1.26.0",
   "onnxruntime>=1.19.0",
   "tokenizers>=0.20.0",
   "huggingface-hub>=0.20.0"
 ]
-
-[project.optional-dependencies]
 torch = [
   "sentence-transformers>=3.0.0"
 ]
