@@ -40,3 +40,19 @@ def test_parse_event_occurrences_single_date() -> None:
     assert len(occurrences) == 1
     assert occurrences[0].occurrence_id.startswith("open-house:")
 
+
+def test_html_stripped_from_description() -> None:
+    payload = {
+        "events": [
+            {
+                "id": "html-event",
+                "title": "Event",
+                "description": "<p>Join us for <b>fun</b>!</p>",
+                "start": "2026-03-10T01:00:00Z",
+            }
+        ]
+    }
+    occurrences = parse_event_occurrences(payload)
+    assert "<p>" not in occurrences[0].description
+    assert "<b>" not in occurrences[0].description
+    assert "fun" in occurrences[0].description

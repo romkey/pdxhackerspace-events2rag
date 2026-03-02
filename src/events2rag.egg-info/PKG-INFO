@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: events2rag
-Version: 0.1.0
+Version: 0.2.0
 Summary: Ingest events JSON/ICS feeds and upsert vectors to Qdrant.
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
@@ -10,6 +10,7 @@ Requires-Dist: qdrant-client>=1.15.0
 Requires-Dist: sentence-transformers>=3.0.0
 Requires-Dist: icalendar>=6.1.0
 Requires-Dist: recurring-ical-events>=3.5.0
+Requires-Dist: beautifulsoup4>=4.12.0
 Provides-Extra: dev
 Requires-Dist: pytest>=8.3.0; extra == "dev"
 Requires-Dist: pytest-mock>=3.14.0; extra == "dev"
@@ -80,13 +81,13 @@ docker compose -f docker-compose.dev.yml run --rm test
 Create and push a git tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 This publishes image tags like:
 
-- `ghcr.io/<owner>/<repo>:0.1.0`
+- `ghcr.io/<owner>/<repo>:0.2.0`
 - `ghcr.io/<owner>/<repo>:0.1`
 - `ghcr.io/<owner>/<repo>:0`
 - `ghcr.io/<owner>/<repo>:latest`

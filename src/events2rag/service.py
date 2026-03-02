@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from events2rag.config import Settings
@@ -11,13 +12,21 @@ from events2rag.ics_feed import fetch_ics, parse_ics_occurrences
 from events2rag.json_feed import fetch_json, parse_event_occurrences
 from events2rag.models import EventOccurrence, EventSummary
 from events2rag.qdrant_store import QdrantStore
+from events2rag.text_utils import (
+    estimate_frequency,
+    human_duration,
+    temporal_status,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class IngestionService:
     def __init__(
-        self, settings: Settings, store: QdrantStore, embedder: Embedder
+        self,
+        settings: Settings,
+        store: QdrantStore,
+        embedder: Embedder,
     ) -> None:
         self._settings = settings
         self._store = store
@@ -29,7 +38,12 @@ class IngestionService:
         sleep_fn: Callable[[float], None] = time.sleep,
     ) -> None:
         while True:
-            self.run_cycle()
+            try:
+                self.run_cycle()
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                logger.exception("Ingestion cycle failed; will retry.")
             sleep_fn(self._settings.poll_interval_seconds)
 
     def run_cycle(self) -> int:
@@ -38,24 +52,27 @@ class IngestionService:
             logger.info("No events discovered; nothing to upsert.")
             return 0
 
+        now = datetime.now(tz=UTC)
         deduped = _dedupe_occurrences(occurrences)
+        enriched = _enrich_occurrences(deduped, now)
+
         occurrence_vectors = self._embed_batches(
-            [occurrence.embedding_text() for occurrence in deduped]
+            [occ.embedding_text() for occ in enriched]
         )
         upserted_occurrences = self._store.upsert_occurrences(
-            deduped, occurrence_vectors
+            enriched, occurrence_vectors
         )
 
-        summaries = _build_event_summaries(deduped)
+        summaries = _build_event_summaries(enriched, now)
         summary_vectors = self._embed_batches(
-            [summary.embedding_text() for summary in summaries]
+            [s.embedding_text() for s in summaries]
         )
         upserted_summaries = self._store.upsert_event_summaries(
             summaries, summary_vectors
         )
 
         logger.info(
-            "Upserted %s occurrences and %s event summaries into Qdrant.",
+            "Upserted %s occurrences and %s event summaries.",
             upserted_occurrences,
             upserted_summaries,
         )
@@ -63,13 +80,17 @@ class IngestionService:
 
     def _collect_occurrences(self) -> list[EventOccurrence]:
         payload = fetch_json(
-            self._settings.events_json_url, self._settings.request_timeout_seconds
+            self._settings.events_json_url,
+            self._settings.request_timeout_seconds,
         )
         occurrences = parse_event_occurrences(payload)
-        logger.info("Parsed %s occurrences from JSON feed.", len(occurrences))
+        logger.info(
+            "Parsed %s occurrences from JSON feed.", len(occurrences)
+        )
         if self._settings.events_ics_url:
             ics_content = fetch_ics(
-                self._settings.events_ics_url, self._settings.request_timeout_seconds
+                self._settings.events_ics_url,
+                self._settings.request_timeout_seconds,
             )
             ics_occurrences = parse_ics_occurrences(
                 ics_content,
@@ -77,7 +98,10 @@ class IngestionService:
                 lookahead_days=self._settings.ics_lookahead_days,
             )
             occurrences.extend(ics_occurrences)
-            logger.info("Parsed %s occurrences from ICS feed.", len(ics_occurrences))
+            logger.info(
+                "Parsed %s occurrences from ICS feed.",
+                len(ics_occurrences),
+            )
         return occurrences
 
     def _embed_batches(self, texts: list[str]) -> list[list[float]]:
@@ -89,43 +113,66 @@ class IngestionService:
         return vectors
 
 
-def _dedupe_occurrences(occurrences: list[EventOccurrence]) -> list[EventOccurrence]:
+def _dedupe_occurrences(
+    occurrences: list[EventOccurrence],
+) -> list[EventOccurrence]:
     deduped_by_id: dict[str, EventOccurrence] = {}
     for occurrence in occurrences:
         deduped_by_id[occurrence.occurrence_id] = occurrence
     return list(deduped_by_id.values())
 
 
-def _build_event_summaries(occurrences: list[EventOccurrence]) -> list[EventSummary]:
+def _enrich_occurrences(
+    occurrences: list[EventOccurrence], now: datetime
+) -> list[EventOccurrence]:
+    enriched: list[EventOccurrence] = []
+    for occ in occurrences:
+        status = temporal_status(occ.start_time, occ.end_time, now)
+        duration = human_duration(occ.start_time, occ.end_time)
+        enriched.append(
+            replace(occ, temporal_status=status, duration=duration)
+        )
+    return enriched
+
+
+def _build_event_summaries(
+    occurrences: list[EventOccurrence], now: datetime
+) -> list[EventSummary]:
     grouped: dict[str, list[EventOccurrence]] = {}
     for occurrence in occurrences:
         grouped.setdefault(occurrence.event_id, []).append(occurrence)
 
-    now = datetime.now(tz=UTC)
     summaries: list[EventSummary] = []
     for event_id, event_occurrences in grouped.items():
         first = event_occurrences[0]
         next_start = _next_occurrence_start(event_occurrences, now)
+        has_future = any(
+            occ.temporal_status in ("future", "current")
+            for occ in event_occurrences
+        )
         locations = sorted(
             {
-                occurrence.location
-                for occurrence in event_occurrences
-                if occurrence.location
+                occ.location
+                for occ in event_occurrences
+                if occ.location
             }
         )
         tags = sorted(
             {
                 tag
-                for occurrence in event_occurrences
-                for tag in occurrence.tags
+                for occ in event_occurrences
+                for tag in occ.tags
                 if tag and tag.strip()
             }
         )
         last_modified_candidates = [
-            occurrence.last_modified
-            for occurrence in event_occurrences
-            if occurrence.last_modified is not None
+            occ.last_modified
+            for occ in event_occurrences
+            if occ.last_modified is not None
         ]
+        freq = estimate_frequency(
+            [occ.start_time for occ in event_occurrences]
+        )
         summaries.append(
             EventSummary(
                 event_id=event_id,
@@ -140,6 +187,8 @@ def _build_event_summaries(occurrences: list[EventOccurrence]) -> list[EventSumm
                 last_modified=max(last_modified_candidates)
                 if last_modified_candidates
                 else None,
+                frequency=freq,
+                has_future_occurrences=has_future,
             )
         )
     return summaries
@@ -149,12 +198,11 @@ def _next_occurrence_start(
     occurrences: list[EventOccurrence], now: datetime
 ) -> datetime | None:
     future_times = sorted(
-        occurrence.start_time
-        for occurrence in occurrences
-        if occurrence.start_time >= now
+        occ.start_time
+        for occ in occurrences
+        if occ.start_time >= now
     )
     if future_times:
         return future_times[0]
-    all_times = sorted(occurrence.start_time for occurrence in occurrences)
+    all_times = sorted(occ.start_time for occ in occurrences)
     return all_times[-1] if all_times else None
-

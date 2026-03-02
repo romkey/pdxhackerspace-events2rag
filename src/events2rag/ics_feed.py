@@ -9,6 +9,7 @@ from icalendar import Calendar
 
 from events2rag.datetime_utils import ensure_utc
 from events2rag.models import EventOccurrence
+from events2rag.text_utils import collapse_whitespace, strip_html
 
 
 def fetch_ics(url: str, timeout_seconds: int) -> str:
@@ -43,7 +44,8 @@ def _event_to_occurrence(event: Any) -> EventOccurrence | None:
     occurrence_id = f"{uid}:{start.isoformat()}"
     url = _safe_str(event.get("URL"))
     title = _safe_str(event.get("SUMMARY")) or uid
-    description = _safe_str(event.get("DESCRIPTION")) or ""
+    raw_description = _safe_str(event.get("DESCRIPTION")) or ""
+    description = collapse_whitespace(strip_html(raw_description))
     location = _safe_str(event.get("LOCATION"))
     categories = event.get("CATEGORIES")
     tags: list[str] = []

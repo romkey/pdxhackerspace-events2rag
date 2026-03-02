@@ -10,6 +10,7 @@ src/events2rag/main.py
 src/events2rag/models.py
 src/events2rag/qdrant_store.py
 src/events2rag/service.py
+src/events2rag/text_utils.py
 src/events2rag.egg-info/PKG-INFO
 src/events2rag.egg-info/SOURCES.txt
 src/events2rag.egg-info/dependency_links.txt
@@ -17,4 +18,6 @@ src/events2rag.egg-info/entry_points.txt
 src/events2rag.egg-info/requires.txt
 src/events2rag.egg-info/top_level.txt
 tests/test_json_feed.py
+tests/test_qdrant_store.py
 tests/test_service.py
+tests/test_text_utils.py

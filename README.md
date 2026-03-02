@@ -8,7 +8,12 @@ Event feed ingester for RAG. It fetches a JSON event feed (and optional ICS feed
 - Polling loop that rescans every hour by default
 - JSON feed ingestion (`EVENTS_JSON_URL`)
 - Optional ICS ingestion with recurrence expansion (`EVENTS_ICS_URL`)
-- Qdrant collection creation and vector upsert
+- HTML stripping from event descriptions
+- Human-friendly dates with day-of-week in embeddings
+- Duration and temporal status (past/current/future) per occurrence
+- Event-level summaries with frequency estimation
+- Qdrant payload indexes for hybrid vector + filter search
+- Resilient polling loop that survives transient errors
 - Dockerized runtime
 - GitHub Actions for CI and Docker image publishing
 
@@ -63,14 +68,14 @@ docker compose -f docker-compose.dev.yml run --rm test
 Create and push a git tag:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 This publishes image tags like:
 
-- `ghcr.io/<owner>/<repo>:0.2.0`
-- `ghcr.io/<owner>/<repo>:0.1`
+- `ghcr.io/<owner>/<repo>:0.3.0`
+- `ghcr.io/<owner>/<repo>:0.3`
 - `ghcr.io/<owner>/<repo>:0`
 - `ghcr.io/<owner>/<repo>:latest`
 

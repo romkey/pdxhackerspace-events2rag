@@ -6,6 +6,7 @@ import requests
 
 from events2rag.datetime_utils import parse_datetime
 from events2rag.models import EventOccurrence
+from events2rag.text_utils import collapse_whitespace, strip_html
 
 
 def fetch_json(url: str, timeout_seconds: int) -> Any:
@@ -46,13 +47,14 @@ def _event_to_occurrences(event: dict[str, Any]) -> list[EventOccurrence]:
         or "unknown-event"
     )
     title = str(event.get("title") or event.get("name") or event_id)
-    description = str(
+    raw_description = str(
         event.get("description")
         or event.get("details")
         or event.get("body")
         or event.get("content")
         or ""
     )
+    description = collapse_whitespace(strip_html(raw_description))
     location = _coerce_location(event.get("location"))
     source_url = _coerce_str(event.get("url") or event.get("link"))
     tags = _coerce_tags(event.get("tags") or event.get("categories"))
