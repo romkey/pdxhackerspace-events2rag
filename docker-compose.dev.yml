@@ -1,0 +1,21 @@
+services:
+  lint:
+    image: python:3.11-slim
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    command: >
+      sh -c "pip install --upgrade pip &&
+      pip install -e '.[dev]' &&
+      ruff check src tests"
+
+  test:
+    image: python:3.11-slim
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    command: >
+      sh -c "pip install --upgrade pip &&
+      pip install -e '.[dev]' &&
+      pytest -q"
+

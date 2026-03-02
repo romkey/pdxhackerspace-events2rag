@@ -1,0 +1,2 @@
+[console_scripts]
+events2rag = events2rag.main:main

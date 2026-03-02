@@ -1,0 +1,2 @@
+"""events2rag package."""
+
