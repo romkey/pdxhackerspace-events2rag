@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: events2rag
-Version: 0.3.1
+Version: 0.4.0
 Summary: Ingest events JSON/ICS feeds and upsert vectors to Qdrant.
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown

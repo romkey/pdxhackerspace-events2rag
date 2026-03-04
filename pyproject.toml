@@ -1,6 +1,6 @@
 [project]
 name = "events2rag"
-version = "0.4.0"
+version = "0.5.0"
 description = "Ingest events JSON/ICS feeds and upsert vectors to Qdrant."
 readme = "README.md"
 requires-python = ">=3.11"

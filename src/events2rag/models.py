@@ -28,12 +28,10 @@ class EventOccurrence:
         tag_text = ", ".join(self.tags) if self.tags else "none"
         description = self.description or "no description"
         duration_text = self.duration or "unknown"
-        status = self.temporal_status
         parts = [
             f"Title: {self.title}",
             f"When: {when}",
             f"Duration: {duration_text}",
-            f"Status: {status}",
             f"Where: {where}",
             f"Tags: {tag_text}",
             f"Description: {description}",
@@ -69,15 +67,9 @@ class EventSummary:
             f"{self.frequency.capitalize()} "
             f"({self.occurrence_count} occurrences)"
         )
-        availability = (
-            "upcoming occurrences available"
-            if self.has_future_occurrences
-            else "no upcoming occurrences"
-        )
         parts = [
             f"Event: {self.title}",
             f"Schedule: {schedule}",
-            f"Availability: {availability}",
             f"Next Occurrence: {next_when}",
             f"Locations: {where}",
             f"Tags: {tag_text}",

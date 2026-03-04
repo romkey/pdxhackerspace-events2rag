@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, uuid5
 
 from qdrant_client import QdrantClient
+from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.models import (
     Distance,
     PayloadSchemaType,
@@ -13,6 +15,8 @@ from qdrant_client.models import (
 )
 
 from events2rag.models import EventOccurrence, EventSummary
+
+logger = logging.getLogger(__name__)
 
 DISTANCE_BY_NAME: dict[str, Distance] = {
     "Cosine": Distance.COSINE,
@@ -28,6 +32,8 @@ PAYLOAD_INDEXES: dict[str, PayloadSchemaType] = {
     "location": PayloadSchemaType.KEYWORD,
     "event_id": PayloadSchemaType.KEYWORD,
     "start_time": PayloadSchemaType.DATETIME,
+    "end_time": PayloadSchemaType.DATETIME,
+    "has_future_occurrences": PayloadSchemaType.INTEGER,
 }
 
 
@@ -60,11 +66,36 @@ class QdrantStore:
 
     def _ensure_payload_indexes(self) -> None:
         for field_name, schema_type in PAYLOAD_INDEXES.items():
-            self._client.create_payload_index(
-                collection_name=self._collection_name,
-                field_name=field_name,
-                field_schema=schema_type,
-            )
+            try:
+                self._client.create_payload_index(
+                    collection_name=self._collection_name,
+                    field_name=field_name,
+                    field_schema=schema_type,
+                )
+            except UnexpectedResponse as exc:
+                if "already exists" not in str(exc).lower():
+                    logger.warning(
+                        "Failed to create payload index for %s: %s",
+                        field_name,
+                        exc,
+                    )
+
+    def get_existing_metadata(
+        self, point_ids: list[str]
+    ) -> dict[str, dict]:
+        """Fetch ingested_at and last_modified for existing points."""
+        if not point_ids:
+            return {}
+        results = self._client.retrieve(
+            collection_name=self._collection_name,
+            ids=point_ids,
+            with_payload=["ingested_at", "last_modified"],
+            with_vectors=False,
+        )
+        return {
+            str(point.id): point.payload or {}
+            for point in results
+        }
 
     def upsert_occurrences(
         self,

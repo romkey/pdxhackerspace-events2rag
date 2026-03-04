@@ -38,7 +38,10 @@ def human_duration(
             return f"{d}, {h}"
         return f"{days} day{'s' if days != 1 else ''}"
     if minutes:
-        return f"{hours} hour{'s' if hours != 1 else ''}, {minutes} minutes"
+        return (
+            f"{hours} hour{'s' if hours != 1 else ''}, "
+            f"{minutes} minutes"
+        )
     return f"{hours} hour{'s' if hours != 1 else ''}"
 
 
@@ -53,9 +56,12 @@ def temporal_status(
     return "future"
 
 
-def estimate_frequency(
-    start_times: list[datetime],
-) -> str:
+def estimate_frequency(start_times: list[datetime]) -> str:
+    """Estimate recurrence pattern from a list of occurrence start times.
+
+    The input list does not need to be sorted; it is sorted internally.
+    Returns a human-readable frequency label.
+    """
     if len(start_times) < 2:
         return "one-time"
     sorted_times = sorted(start_times)
@@ -68,10 +74,14 @@ def estimate_frequency(
         return "daily"
     if avg_gap <= 9:
         return "weekly"
-    if avg_gap <= 18:
+    if avg_gap <= 12:
         return "biweekly"
+    if avg_gap <= 23:
+        return "every three weeks"
     if avg_gap <= 45:
         return "monthly"
+    if avg_gap <= 75:
+        return "bimonthly"
     return "occasional"
 
 

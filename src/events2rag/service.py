@@ -11,7 +11,7 @@ from events2rag.embedder import Embedder
 from events2rag.ics_feed import fetch_ics, parse_ics_occurrences
 from events2rag.json_feed import fetch_json, parse_event_occurrences
 from events2rag.models import EventOccurrence, EventSummary
-from events2rag.qdrant_store import QdrantStore
+from events2rag.qdrant_store import QdrantStore, _to_point_id
 from events2rag.text_utils import (
     estimate_frequency,
     human_duration,
@@ -19,6 +19,8 @@ from events2rag.text_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+_MIN_DATETIME = datetime.min.replace(tzinfo=UTC)
 
 
 class IngestionService:
@@ -54,14 +56,19 @@ class IngestionService:
 
         now = datetime.now(tz=UTC)
         deduped = _dedupe_occurrences(occurrences)
-        enriched = _enrich_occurrences(deduped, now)
+        cross_deduped = _dedupe_by_time_and_title(deduped)
+        enriched = _enrich_occurrences(cross_deduped, now)
 
-        occurrence_vectors = self._embed_batches(
-            [occ.embedding_text() for occ in enriched]
-        )
-        upserted_occurrences = self._store.upsert_occurrences(
-            enriched, occurrence_vectors
-        )
+        to_embed = self._filter_changed(enriched)
+        if to_embed:
+            vectors = self._embed_batches(
+                [occ.embedding_text() for occ in to_embed]
+            )
+            upserted_occurrences = self._store.upsert_occurrences(
+                to_embed, vectors
+            )
+        else:
+            upserted_occurrences = 0
 
         summaries = _build_event_summaries(enriched, now)
         summary_vectors = self._embed_batches(
@@ -72,11 +79,39 @@ class IngestionService:
         )
 
         logger.info(
-            "Upserted %s occurrences and %s event summaries.",
+            "Upserted %s occurrences (%s skipped unchanged) "
+            "and %s event summaries.",
             upserted_occurrences,
+            len(enriched) - len(to_embed),
             upserted_summaries,
         )
         return upserted_occurrences + upserted_summaries
+
+    def _filter_changed(
+        self, occurrences: list[EventOccurrence]
+    ) -> list[EventOccurrence]:
+        """Skip re-embedding occurrences whose last_modified hasn't changed."""
+        point_ids = [
+            _to_point_id(occ.occurrence_id) for occ in occurrences
+        ]
+        existing = self._store.get_existing_metadata(point_ids)
+
+        changed: list[EventOccurrence] = []
+        for occ, pid in zip(occurrences, point_ids, strict=True):
+            meta = existing.get(pid)
+            if meta is None:
+                changed.append(occ)
+                continue
+            if occ.last_modified is None:
+                continue
+            ingested_at_str = meta.get("ingested_at")
+            if ingested_at_str is None:
+                changed.append(occ)
+                continue
+            ingested_at = datetime.fromisoformat(ingested_at_str)
+            if occ.last_modified > ingested_at:
+                changed.append(occ)
+        return changed
 
     def _collect_occurrences(self) -> list[EventOccurrence]:
         payload = fetch_json(
@@ -85,7 +120,8 @@ class IngestionService:
         )
         occurrences = parse_event_occurrences(payload)
         logger.info(
-            "Parsed %s occurrences from JSON feed.", len(occurrences)
+            "Parsed %s occurrences from JSON feed.",
+            len(occurrences),
         )
         if self._settings.events_ics_url:
             ics_content = fetch_ics(
@@ -96,6 +132,7 @@ class IngestionService:
                 ics_content,
                 lookback_days=self._settings.ics_lookback_days,
                 lookahead_days=self._settings.ics_lookahead_days,
+                feed_url=self._settings.events_ics_url,
             )
             occurrences.extend(ics_occurrences)
             logger.info(
@@ -122,6 +159,26 @@ def _dedupe_occurrences(
     return list(deduped_by_id.values())
 
 
+def _dedupe_by_time_and_title(
+    occurrences: list[EventOccurrence],
+) -> list[EventOccurrence]:
+    """Secondary dedup across sources by (normalized title, start_time).
+
+    When both a JSON and ICS occurrence match, the JSON version is kept
+    because it tends to have richer metadata.
+    """
+    seen: dict[tuple[str, str], EventOccurrence] = {}
+    for occ in occurrences:
+        key = (
+            occ.title.strip().lower(),
+            occ.start_time.isoformat(),
+        )
+        existing = seen.get(key)
+        if existing is None or occ.source_type == "json":
+            seen[key] = occ
+    return list(seen.values())
+
+
 def _enrich_occurrences(
     occurrences: list[EventOccurrence], now: datetime
 ) -> list[EventOccurrence]:
@@ -144,7 +201,10 @@ def _build_event_summaries(
 
     summaries: list[EventSummary] = []
     for event_id, event_occurrences in grouped.items():
-        first = event_occurrences[0]
+        canonical = max(
+            event_occurrences,
+            key=lambda o: o.last_modified or _MIN_DATETIME,
+        )
         next_start = _next_occurrence_start(event_occurrences, now)
         has_future = any(
             occ.temporal_status in ("future", "current")
@@ -176,13 +236,13 @@ def _build_event_summaries(
         summaries.append(
             EventSummary(
                 event_id=event_id,
-                title=first.title,
-                description=first.description,
+                title=canonical.title,
+                description=canonical.description,
                 next_start_time=next_start,
                 locations=locations,
                 tags=tags,
-                source_url=first.source_url,
-                source_type=first.source_type,
+                source_url=canonical.source_url,
+                source_type=canonical.source_type,
                 occurrence_count=len(event_occurrences),
                 last_modified=max(last_modified_candidates)
                 if last_modified_candidates

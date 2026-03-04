@@ -83,8 +83,47 @@ def test_estimate_frequency_weekly() -> None:
     assert estimate_frequency(times) == "weekly"
 
 
+def test_estimate_frequency_biweekly() -> None:
+    times = [
+        datetime(2026, 3, 1, tzinfo=UTC),
+        datetime(2026, 3, 12, tzinfo=UTC),
+        datetime(2026, 3, 23, tzinfo=UTC),
+    ]
+    assert estimate_frequency(times) == "biweekly"
+
+
+def test_estimate_frequency_every_three_weeks() -> None:
+    times = [
+        datetime(2026, 3, 1, tzinfo=UTC),
+        datetime(2026, 3, 22, tzinfo=UTC),
+        datetime(2026, 4, 12, tzinfo=UTC),
+    ]
+    assert estimate_frequency(times) == "every three weeks"
+
+
+def test_estimate_frequency_monthly() -> None:
+    times = [
+        datetime(2026, 1, 1, tzinfo=UTC),
+        datetime(2026, 2, 1, tzinfo=UTC),
+        datetime(2026, 3, 1, tzinfo=UTC),
+    ]
+    assert estimate_frequency(times) == "monthly"
+
+
+def test_estimate_frequency_bimonthly() -> None:
+    times = [
+        datetime(2026, 1, 1, tzinfo=UTC),
+        datetime(2026, 3, 1, tzinfo=UTC),
+        datetime(2026, 5, 1, tzinfo=UTC),
+    ]
+    assert estimate_frequency(times) == "bimonthly"
+
+
 def test_estimate_frequency_one_time() -> None:
-    assert estimate_frequency([datetime(2026, 3, 1, tzinfo=UTC)]) == "one-time"
+    assert (
+        estimate_frequency([datetime(2026, 3, 1, tzinfo=UTC)])
+        == "one-time"
+    )
 
 
 def test_collapse_whitespace() -> None:

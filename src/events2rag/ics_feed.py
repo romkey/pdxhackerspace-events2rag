@@ -19,7 +19,10 @@ def fetch_ics(url: str, timeout_seconds: int) -> str:
 
 
 def parse_ics_occurrences(
-    content: str, lookback_days: int = 30, lookahead_days: int = 365
+    content: str,
+    lookback_days: int = 30,
+    lookahead_days: int = 365,
+    feed_url: str | None = None,
 ) -> list[EventOccurrence]:
     calendar = Calendar.from_ical(content)
     start = datetime.now(tz=UTC) - timedelta(days=lookback_days)
@@ -27,13 +30,15 @@ def parse_ics_occurrences(
     events = recurring_ical_events.of(calendar).between(start, end)
     occurrences: list[EventOccurrence] = []
     for event in events:
-        occurrence = _event_to_occurrence(event)
+        occurrence = _event_to_occurrence(event, feed_url=feed_url)
         if occurrence:
             occurrences.append(occurrence)
     return occurrences
 
 
-def _event_to_occurrence(event: Any) -> EventOccurrence | None:
+def _event_to_occurrence(
+    event: Any, feed_url: str | None = None
+) -> EventOccurrence | None:
     raw_start = event.get("DTSTART")
     if raw_start is None:
         return None
@@ -42,7 +47,7 @@ def _event_to_occurrence(event: Any) -> EventOccurrence | None:
     end = _to_datetime(raw_end.dt) if raw_end else None
     uid = str(event.get("UID") or "ics-event")
     occurrence_id = f"{uid}:{start.isoformat()}"
-    url = _safe_str(event.get("URL"))
+    url = _safe_str(event.get("URL")) or feed_url
     title = _safe_str(event.get("SUMMARY")) or uid
     raw_description = _safe_str(event.get("DESCRIPTION")) or ""
     description = collapse_whitespace(strip_html(raw_description))
@@ -79,4 +84,3 @@ def _to_datetime(value: Any) -> datetime:
     if isinstance(value, datetime):
         return ensure_utc(value)
     return datetime(value.year, value.month, value.day, tzinfo=UTC)
-
