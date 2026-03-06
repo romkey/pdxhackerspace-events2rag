@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 
 from events2rag.text_utils import (
@@ -7,6 +8,7 @@ from events2rag.text_utils import (
     human_duration,
     strip_html,
     temporal_status,
+    truncate_for_embedding,
 )
 
 
@@ -128,3 +130,23 @@ def test_estimate_frequency_one_time() -> None:
 
 def test_collapse_whitespace() -> None:
     assert collapse_whitespace("  hello   world  ") == "hello world"
+
+
+def test_truncate_for_embedding_short_text_unchanged() -> None:
+    text = "This is short"
+    assert truncate_for_embedding(text, max_tokens=512) == text
+
+
+def test_truncate_for_embedding_long_text_truncated() -> None:
+    text = "word " * 1000
+    result = truncate_for_embedding(text, max_tokens=10)
+    assert len(result) <= 10 * 3
+    assert not result.endswith(" ")
+
+
+def test_truncate_for_embedding_logs_warning(caplog) -> None:
+    text = "word " * 1000
+    log = logging.getLogger("test_truncate")
+    with caplog.at_level(logging.WARNING, logger="test_truncate"):
+        truncate_for_embedding(text, max_tokens=10, logger=log)
+    assert "Truncated" in caplog.text

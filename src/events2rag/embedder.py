@@ -32,7 +32,11 @@ class OllamaEmbedder:
     def _probe_dimension(self) -> int:
         response = requests.post(
             self._url,
-            json={"model": self._model_name, "input": "hello"},
+            json={
+                "model": self._model_name,
+                "input": "hello",
+                "truncate": True,
+            },
             timeout=self._timeout,
         )
         response.raise_for_status()
@@ -48,7 +52,11 @@ class OllamaEmbedder:
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         response = requests.post(
             self._url,
-            json={"model": self._model_name, "input": list(texts)},
+            json={
+                "model": self._model_name,
+                "input": list(texts),
+                "truncate": True,
+            },
             timeout=self._timeout,
         )
         response.raise_for_status()
@@ -63,7 +71,9 @@ class OllamaEmbedder:
 class OnnxEmbedder:
     """Lightweight embedder using ONNX Runtime + HuggingFace tokenizers."""
 
-    def __init__(self, model_name: str) -> None:
+    def __init__(
+        self, model_name: str, max_length: int = 512
+    ) -> None:
         from pathlib import Path
 
         import numpy as np
@@ -89,7 +99,7 @@ class OnnxEmbedder:
             str(model_dir / "tokenizer.json")
         )
         self._tokenizer.enable_padding()
-        self._tokenizer.enable_truncation(max_length=512)
+        self._tokenizer.enable_truncation(max_length=max_length)
         self._session = InferenceSession(onnx_path)
         self._dimension = self._detect_dimension()
 

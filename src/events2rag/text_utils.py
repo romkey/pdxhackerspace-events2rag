@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timedelta
 
@@ -83,6 +84,38 @@ def estimate_frequency(start_times: list[datetime]) -> str:
     if avg_gap <= 75:
         return "bimonthly"
     return "occasional"
+
+
+_CHARS_PER_TOKEN = 3
+
+
+def truncate_for_embedding(
+    text: str,
+    max_tokens: int,
+    logger: logging.Logger | None = None,
+) -> str:
+    """Truncate text to fit within an approximate token budget.
+
+    Uses a conservative character-per-token ratio so the result is
+    unlikely to exceed the model's context window.  Truncation happens
+    at a word boundary when possible, and the caller is warned via the
+    optional *logger*.
+    """
+    max_chars = max_tokens * _CHARS_PER_TOKEN
+    if len(text) <= max_chars:
+        return text
+
+    truncated = text[:max_chars].rsplit(" ", 1)[0]
+    if logger:
+        logger.warning(
+            "Truncated embedding text from %s to %s chars "
+            "(~%s token limit): %.60s…",
+            len(text),
+            len(truncated),
+            max_tokens,
+            text,
+        )
+    return truncated
 
 
 _WHITESPACE_RE = re.compile(r"\s+")

@@ -28,7 +28,10 @@ def build_embedder(settings: Settings) -> Embedder:
     if backend == "onnx":
         from events2rag.embedder import OnnxEmbedder
 
-        return OnnxEmbedder(settings.embedding_model_name)
+        return OnnxEmbedder(
+            settings.embedding_model_name,
+            max_length=settings.embedding_context_length,
+        )
 
     if backend == "sentence-transformers":
         from events2rag.embedder import SentenceTransformerEmbedder

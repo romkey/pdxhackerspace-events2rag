@@ -16,6 +16,7 @@ class Settings:
     embedding_backend: str = "ollama"
     embedding_model_name: str = "qllama/bge-small-en-v1.5"
     embedding_batch_size: int = 64
+    embedding_context_length: int = 512
     ollama_url: str = "http://ollama:11434"
     ics_lookback_days: int = 30
     ics_lookahead_days: int = 365
@@ -53,6 +54,12 @@ class Settings:
                 os.getenv(
                     "EMBEDDING_BATCH_SIZE",
                     str(cls.embedding_batch_size),
+                )
+            ),
+            embedding_context_length=int(
+                os.getenv(
+                    "EMBEDDING_CONTEXT_LENGTH",
+                    str(cls.embedding_context_length),
                 )
             ),
             ollama_url=os.getenv("OLLAMA_URL", cls.ollama_url),
