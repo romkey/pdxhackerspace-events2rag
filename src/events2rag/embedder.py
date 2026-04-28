@@ -22,10 +22,14 @@ class OllamaEmbedder:
         self,
         model_name: str,
         ollama_url: str = "http://ollama:11434",
+        api_key: str | None = None,
         timeout: int = 120,
     ) -> None:
         self._model_name = model_name
         self._url = ollama_url.rstrip("/") + "/api/embed"
+        self._headers = (
+            {"Authorization": f"Bearer {api_key}"} if api_key else None
+        )
         self._timeout = timeout
         self._dimension = self._probe_dimension()
 
@@ -37,6 +41,7 @@ class OllamaEmbedder:
                 "input": "hello",
                 "truncate": True,
             },
+            headers=self._headers,
             timeout=self._timeout,
         )
         response.raise_for_status()
@@ -57,6 +62,7 @@ class OllamaEmbedder:
                 "input": list(texts),
                 "truncate": True,
             },
+            headers=self._headers,
             timeout=self._timeout,
         )
         response.raise_for_status()

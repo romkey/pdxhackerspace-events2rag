@@ -22,6 +22,7 @@ def build_embedder(settings: Settings) -> Embedder:
         return OllamaEmbedder(
             model_name=settings.embedding_model_name,
             ollama_url=settings.ollama_url,
+            api_key=settings.ollama_api_key,
             timeout=settings.request_timeout_seconds,
         )
 

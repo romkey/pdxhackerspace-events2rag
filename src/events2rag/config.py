@@ -18,6 +18,7 @@ class Settings:
     embedding_batch_size: int = 64
     embedding_context_length: int = 512
     ollama_url: str = "http://ollama:11434"
+    ollama_api_key: str | None = None
     ics_lookback_days: int = 30
     ics_lookahead_days: int = 365
     request_timeout_seconds: int = 30
@@ -63,6 +64,7 @@ class Settings:
                 )
             ),
             ollama_url=os.getenv("OLLAMA_URL", cls.ollama_url),
+            ollama_api_key=os.getenv("OLLAMA_API_KEY") or None,
             ics_lookback_days=int(
                 os.getenv(
                     "ICS_LOOKBACK_DAYS", str(cls.ics_lookback_days)

@@ -39,6 +39,7 @@ Key variables:
 - `EMBEDDING_BACKEND`: `ollama`, `onnx`, or `sentence-transformers`
 - `EMBEDDING_MODEL_NAME`: model name (default `qllama/bge-small-en-v1.5`)
 - `OLLAMA_URL`: Ollama endpoint (default `http://ollama:11434`)
+- `OLLAMA_API_KEY`: optional bearer token for hosted/proxied Ollama APIs
 
 ## Run with Docker Compose
 
