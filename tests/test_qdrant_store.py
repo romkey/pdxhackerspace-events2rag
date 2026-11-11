@@ -1,15 +1,16 @@
-from __future__ import annotations
-
 import logging
 import warnings
+from dataclasses import replace
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 import httpx
 import pytest
+from pytest_mock import MockerFixture
 from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
-from qdrant_client.models import Distance
+from qdrant_client.models import Distance, VectorParams
 
 from events2rag import qdrant_store
 from events2rag.models import EventOccurrence, EventSummary
@@ -26,11 +27,11 @@ def test_to_point_id_returns_uuid_and_is_stable() -> None:
 
 
 @pytest.fixture
-def store(monkeypatch) -> QdrantStore:
+def store(monkeypatch: pytest.MonkeyPatch) -> QdrantStore:
     """A QdrantStore backed by qdrant-client's in-memory local mode."""
-    seen: dict = {}
+    seen: dict[str, str | None] = {}
 
-    def fake_client(url, api_key):
+    def fake_client(url: str, api_key: str | None) -> QdrantClient:
         seen["url"] = url
         seen["api_key"] = api_key
         return QdrantClient(location=":memory:")
@@ -50,38 +51,48 @@ def store(monkeypatch) -> QdrantStore:
     return result
 
 
-def _occurrence(**overrides) -> EventOccurrence:
-    values = {
-        "occurrence_id": "e1:2026-03-01",
-        "event_id": "e1",
-        "title": "Hack Night",
-        "description": "Build stuff",
-        "start_time": datetime(2026, 3, 1, 18, tzinfo=UTC),
-        "end_time": datetime(2026, 3, 1, 20, tzinfo=UTC),
-        "location": "Room A",
-        "source_url": "https://example.com",
-        "tags": ["social"],
-        "last_modified": datetime(2026, 2, 1, tzinfo=UTC),
-        "duration": "2 hours",
-    }
-    values.update(overrides)
-    return EventOccurrence(**values)
+_OCCURRENCE = EventOccurrence(
+    occurrence_id="e1:2026-03-01",
+    event_id="e1",
+    title="Hack Night",
+    description="Build stuff",
+    start_time=datetime(2026, 3, 1, 18, tzinfo=UTC),
+    end_time=datetime(2026, 3, 1, 20, tzinfo=UTC),
+    location="Room A",
+    source_url="https://example.com",
+    tags=["social"],
+    last_modified=datetime(2026, 2, 1, tzinfo=UTC),
+    duration="2 hours",
+)
 
 
-def test_ensure_collection_creates_with_configured_distance(store) -> None:
-    info = store._client.get_collection("events")
-    assert info.config.params.vectors.size == 3
-    assert info.config.params.vectors.distance == Distance.DOT
+# Any: each override is a different EventOccurrence field type.
+def _occurrence(**overrides: Any) -> EventOccurrence:
+    return replace(_OCCURRENCE, **overrides)
 
 
-def test_ensure_collection_is_idempotent(store) -> None:
+# Any: Qdrant payloads are JSON whose shape varies by field.
+def _payload(store: QdrantStore, key: str) -> dict[str, Any]:
+    point = store._client.retrieve("events", ids=[_to_point_id(key)])[0]
+    assert point.payload is not None
+    return point.payload
+
+
+def test_ensure_collection_creates_with_configured_distance(store: QdrantStore) -> None:
+    vectors = store._client.get_collection("events").config.params.vectors
+    assert isinstance(vectors, VectorParams)
+    assert vectors.size == 3
+    assert vectors.distance == Distance.DOT
+
+
+def test_ensure_collection_is_idempotent(store: QdrantStore) -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         store.ensure_collection(vector_size=3)
     assert store._client.collection_exists("events")
 
 
-def test_upsert_and_fetch_occurrence_metadata(store) -> None:
+def test_upsert_and_fetch_occurrence_metadata(store: QdrantStore) -> None:
     occ = _occurrence()
     bare = _occurrence(
         occurrence_id="e2:x",
@@ -97,23 +108,22 @@ def test_upsert_and_fetch_occurrence_metadata(store) -> None:
     meta = store.get_existing_metadata([pid, bare_pid, _to_point_id("nope")])
 
     assert set(meta) == {pid, bare_pid}
-    assert meta[pid]["last_modified"] == occ.last_modified.isoformat()
+    assert meta[pid]["last_modified"] == "2026-02-01T00:00:00+00:00"
     assert "ingested_at" in meta[pid]
     assert meta[bare_pid]["last_modified"] is None
 
-    point = store._client.retrieve("events", ids=[pid])[0]
-    assert point.payload["record_type"] == "occurrence"
-    assert point.payload["end_time"] == occ.end_time.isoformat()
-    assert point.payload["embedding_text"] == occ.embedding_text()
-    bare_point = store._client.retrieve("events", ids=[bare_pid])[0]
-    assert bare_point.payload["end_time"] is None
+    payload = _payload(store, occ.occurrence_id)
+    assert payload["record_type"] == "occurrence"
+    assert payload["end_time"] == "2026-03-01T20:00:00+00:00"
+    assert payload["embedding_text"] == occ.embedding_text()
+    assert _payload(store, bare.occurrence_id)["end_time"] is None
 
 
-def test_get_existing_metadata_empty(store) -> None:
+def test_get_existing_metadata_empty(store: QdrantStore) -> None:
     assert store.get_existing_metadata([]) == {}
 
 
-def test_upsert_event_summaries(store) -> None:
+def test_upsert_event_summaries(store: QdrantStore) -> None:
     summary = EventSummary(
         event_id="e1",
         title="Hack Night",
@@ -134,18 +144,16 @@ def test_upsert_event_summaries(store) -> None:
 
     assert store.upsert_event_summaries([summary, empty], [[1, 0, 0]] * 2) == 2
 
-    point = store._client.retrieve("events", ids=[_to_point_id("event:e1")])[0]
-    assert point.payload["record_type"] == "event_summary"
-    assert point.payload["frequency"] == "weekly"
-    assert point.payload["next_start_time"] == "2026-03-01T18:00:00+00:00"
-    empty_point = store._client.retrieve(
-        "events", ids=[_to_point_id("event:e2")]
-    )[0]
-    assert empty_point.payload["next_start_time"] is None
-    assert empty_point.payload["last_modified"] is None
+    payload = _payload(store, "event:e1")
+    assert payload["record_type"] == "event_summary"
+    assert payload["frequency"] == "weekly"
+    assert payload["next_start_time"] == "2026-03-01T18:00:00+00:00"
+    empty_payload = _payload(store, "event:e2")
+    assert empty_payload["next_start_time"] is None
+    assert empty_payload["last_modified"] is None
 
 
-def test_upsert_length_mismatch_raises(store) -> None:
+def test_upsert_length_mismatch_raises(store: QdrantStore) -> None:
     with pytest.raises(ValueError, match="equal lengths"):
         store.upsert_occurrences([_occurrence()], [])
     with pytest.raises(ValueError, match="equal lengths"):
@@ -162,7 +170,7 @@ def _unexpected(message: str) -> UnexpectedResponse:
 
 
 def test_payload_index_errors_are_logged_unless_already_exists(
-    mocker, caplog
+    mocker: MockerFixture, caplog: pytest.LogCaptureFixture
 ) -> None:
     client = mocker.Mock()
     client.collection_exists.return_value = True
@@ -171,7 +179,7 @@ def test_payload_index_errors_are_logged_unless_already_exists(
         + [None] * len(PAYLOAD_INDEXES)
     )
 
-    def create_payload_index(**_kwargs):
+    def create_payload_index(**_kwargs: object) -> None:
         error = next(errors)
         if error is not None:
             raise error
@@ -190,7 +198,7 @@ def test_payload_index_errors_are_logged_unless_already_exists(
     assert "boom" in warnings_logged[0].getMessage()
 
 
-def test_unknown_distance_defaults_to_cosine(mocker) -> None:
+def test_unknown_distance_defaults_to_cosine(mocker: MockerFixture) -> None:
     client = mocker.Mock()
     client.collection_exists.return_value = False
     mocker.patch.object(qdrant_store, "QdrantClient", return_value=client)

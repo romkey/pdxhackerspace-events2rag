@@ -1,6 +1,8 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from events2rag.text_utils import (
     collapse_whitespace,
     estimate_frequency,
@@ -122,10 +124,7 @@ def test_estimate_frequency_bimonthly() -> None:
 
 
 def test_estimate_frequency_one_time() -> None:
-    assert (
-        estimate_frequency([datetime(2026, 3, 1, tzinfo=UTC)])
-        == "one-time"
-    )
+    assert estimate_frequency([datetime(2026, 3, 1, tzinfo=UTC)]) == "one-time"
 
 
 def test_collapse_whitespace() -> None:
@@ -144,7 +143,7 @@ def test_truncate_for_embedding_long_text_truncated() -> None:
     assert not result.endswith(" ")
 
 
-def test_truncate_for_embedding_logs_warning(caplog) -> None:
+def test_truncate_for_embedding_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
     text = "word " * 1000
     log = logging.getLogger("test_truncate")
     with caplog.at_level(logging.WARNING, logger="test_truncate"):
@@ -167,13 +166,9 @@ def test_human_duration_days() -> None:
     start = datetime(2026, 3, 1, 18, 0, tzinfo=UTC)
     assert human_duration(start, start + timedelta(days=1)) == "1 day"
     assert human_duration(start, start + timedelta(days=2)) == "2 days"
+    assert human_duration(start, start + timedelta(days=1, hours=1)) == "1 day, 1 hour"
     assert (
-        human_duration(start, start + timedelta(days=1, hours=1))
-        == "1 day, 1 hour"
-    )
-    assert (
-        human_duration(start, start + timedelta(days=2, hours=5))
-        == "2 days, 5 hours"
+        human_duration(start, start + timedelta(days=2, hours=5)) == "2 days, 5 hours"
     )
 
 

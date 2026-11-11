@@ -1,7 +1,6 @@
-from __future__ import annotations
-
 from datetime import UTC, date, datetime, timedelta
 
+import pytest
 import requests
 
 from events2rag import ics_feed
@@ -48,9 +47,7 @@ def test_parse_ics_expands_recurring_event() -> None:
         "END:VEVENT",
     )
 
-    occurrences = parse_ics_occurrences(
-        content, lookback_days=1, lookahead_days=60
-    )
+    occurrences = parse_ics_occurrences(content, lookback_days=1, lookahead_days=60)
 
     assert len(occurrences) == 3
     first = sorted(occurrences, key=lambda o: o.start_time)[0]
@@ -90,9 +87,7 @@ def test_parse_ics_respects_window_and_defaults() -> None:
     occ = occurrences[0]
     assert occ.title == "all-day"
     assert occ.description == ""
-    assert occ.start_time == datetime(
-        soon.year, soon.month, soon.day, tzinfo=UTC
-    )
+    assert occ.start_time == datetime(soon.year, soon.month, soon.day, tzinfo=UTC)
     assert occ.location is None
     assert occ.source_url == "https://example.com/feed.ics"
     assert occ.tags == []
@@ -103,8 +98,10 @@ def test_event_without_dtstart_is_skipped() -> None:
     assert _event_to_occurrence({}) is None
 
 
-def test_parse_ics_skips_events_without_occurrence(monkeypatch) -> None:
-    monkeypatch.setattr(ics_feed, "_event_to_occurrence", lambda *a, **k: None)
+def test_parse_ics_skips_events_without_occurrence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ics_feed, "_event_to_occurrence", lambda *_a, **_k: None)
     start = datetime.now(tz=UTC) + timedelta(days=1)
     content = _ics(
         "BEGIN:VEVENT",
@@ -117,13 +114,12 @@ def test_parse_ics_skips_events_without_occurrence(monkeypatch) -> None:
 
 def test_to_datetime_handles_dates_and_datetimes() -> None:
     assert _to_datetime(date(2026, 5, 4)) == datetime(2026, 5, 4, tzinfo=UTC)
-    assert _to_datetime(datetime(2026, 5, 4, 12, 30)) == datetime(
-        2026, 5, 4, 12, 30, tzinfo=UTC
-    )
+    naive = datetime(2026, 5, 4, 12, 30)  # noqa: DTZ001 - testing naive input
+    assert _to_datetime(naive) == datetime(2026, 5, 4, 12, 30, tzinfo=UTC)
 
 
-def test_fetch_ics(monkeypatch) -> None:
-    seen: dict = {}
+def test_fetch_ics(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
 
     class FakeResponse:
         text = "BEGIN:VCALENDAR"
@@ -131,7 +127,7 @@ def test_fetch_ics(monkeypatch) -> None:
         def raise_for_status(self) -> None:
             seen["raised"] = True
 
-    def fake_get(url, timeout=None):
+    def fake_get(url: str, timeout: float | None = None) -> FakeResponse:
         seen["url"] = url
         seen["timeout"] = timeout
         return FakeResponse()

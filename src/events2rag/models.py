@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -56,16 +54,13 @@ class EventSummary:
 
     def embedding_text(self) -> str:
         next_when = (
-            human_date(self.next_start_time)
-            if self.next_start_time
-            else "unknown"
+            human_date(self.next_start_time) if self.next_start_time else "unknown"
         )
         where = ", ".join(self.locations) if self.locations else "unknown"
         tag_text = ", ".join(self.tags) if self.tags else "none"
         description = self.description or "no description"
         schedule = (
-            f"{self.frequency.capitalize()} "
-            f"({self.occurrence_count} occurrences)"
+            f"{self.frequency.capitalize()} ({self.occurrence_count} occurrences)"
         )
         parts = [
             f"Event: {self.title}",

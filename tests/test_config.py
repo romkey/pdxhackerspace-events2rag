@@ -1,43 +1,14 @@
-from __future__ import annotations
-
 import pytest
 
-from events2rag.config import Settings
-
-ENV_VARS = [
-    "EVENTS_JSON_URL",
-    "EVENTS_ICS_URL",
-    "POLL_INTERVAL_SECONDS",
-    "QDRANT_URL",
-    "QDRANT_API_KEY",
-    "QDRANT_COLLECTION",
-    "QDRANT_DISTANCE",
-    "EMBEDDING_BACKEND",
-    "EMBEDDING_MODEL_NAME",
-    "EMBEDDING_BATCH_SIZE",
-    "EMBEDDING_CONTEXT_LENGTH",
-    "OLLAMA_URL",
-    "OLLAMA_API_KEY",
-    "ICS_LOOKBACK_DAYS",
-    "ICS_LOOKAHEAD_DAYS",
-    "REQUEST_TIMEOUT_SECONDS",
-    "LOG_LEVEL",
-]
+from events2rag.config import ConfigError, Settings
 
 
-@pytest.fixture
-def clean_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
-    for name in ENV_VARS:
-        monkeypatch.delenv(name, raising=False)
-    return monkeypatch
+def test_from_env_uses_defaults() -> None:
+    assert Settings.from_env({}) == Settings()
 
 
-def test_from_env_uses_defaults(clean_env) -> None:
-    assert Settings.from_env() == Settings()
-
-
-def test_from_env_reads_all_variables(clean_env) -> None:
-    values = {
+def test_from_env_reads_all_variables() -> None:
+    env = {
         "EVENTS_JSON_URL": "https://example.com/events.json",
         "EVENTS_ICS_URL": "https://example.com/events.ics",
         "POLL_INTERVAL_SECONDS": "60",
@@ -51,15 +22,13 @@ def test_from_env_reads_all_variables(clean_env) -> None:
         "EMBEDDING_CONTEXT_LENGTH": "256",
         "OLLAMA_URL": "http://localhost:11434",
         "OLLAMA_API_KEY": "ollama-key",
-        "ICS_LOOKBACK_DAYS": "7",
+        "ICS_LOOKBACK_DAYS": "0",
         "ICS_LOOKAHEAD_DAYS": "90",
         "REQUEST_TIMEOUT_SECONDS": "5",
-        "LOG_LEVEL": "DEBUG",
+        "LOG_LEVEL": "debug",
     }
-    for name, value in values.items():
-        clean_env.setenv(name, value)
 
-    assert Settings.from_env() == Settings(
+    assert Settings.from_env(env) == Settings(
         events_json_url="https://example.com/events.json",
         events_ics_url="https://example.com/events.ics",
         poll_interval_seconds=60,
@@ -73,26 +42,39 @@ def test_from_env_reads_all_variables(clean_env) -> None:
         embedding_context_length=256,
         ollama_url="http://localhost:11434",
         ollama_api_key="ollama-key",
-        ics_lookback_days=7,
+        ics_lookback_days=0,
         ics_lookahead_days=90,
         request_timeout_seconds=5,
         log_level="DEBUG",
     )
 
 
-def test_from_env_treats_empty_optional_values_as_none(clean_env) -> None:
-    clean_env.setenv("EVENTS_ICS_URL", "")
-    clean_env.setenv("QDRANT_API_KEY", "")
-    clean_env.setenv("OLLAMA_API_KEY", "")
+def test_from_env_treats_empty_values_as_unset() -> None:
+    env = {
+        "EVENTS_JSON_URL": "",
+        "EVENTS_ICS_URL": "",
+        "POLL_INTERVAL_SECONDS": "",
+        "QDRANT_API_KEY": "",
+        "QDRANT_DISTANCE": "",
+        "OLLAMA_API_KEY": "",
+        "LOG_LEVEL": "",
+    }
+    assert Settings.from_env(env) == Settings()
 
-    settings = Settings.from_env()
 
-    assert settings.events_ics_url is None
-    assert settings.qdrant_api_key is None
-    assert settings.ollama_api_key is None
-
-
-def test_from_env_rejects_non_integer(clean_env) -> None:
-    clean_env.setenv("POLL_INTERVAL_SECONDS", "soon")
-    with pytest.raises(ValueError):
-        Settings.from_env()
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        ("POLL_INTERVAL_SECONDS", "soon", "POLL_INTERVAL_SECONDS must be a whole"),
+        ("POLL_INTERVAL_SECONDS", "0", "POLL_INTERVAL_SECONDS must be at least 1"),
+        ("ICS_LOOKBACK_DAYS", "-1", "ICS_LOOKBACK_DAYS must be at least 0"),
+        ("EMBEDDING_BACKEND", "magic", "EMBEDDING_BACKEND must be one of"),
+        ("QDRANT_DISTANCE", "cosine", "QDRANT_DISTANCE must be one of"),
+        ("QDRANT_URL", "qdrant:6333", "QDRANT_URL must be an http"),
+        ("EVENTS_ICS_URL", "ftp://x", "EVENTS_ICS_URL must be an http"),
+        ("LOG_LEVEL", "chatty", "LOG_LEVEL 'CHATTY' is not a logging level"),
+    ],
+)
+def test_from_env_rejects_bad_values(name: str, value: str, message: str) -> None:
+    with pytest.raises(ConfigError, match=message):
+        Settings.from_env({name: value})

@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+import pytest
 import requests
 
 from events2rag.json_feed import (
@@ -171,17 +172,17 @@ def test_nested_occurrences_all_invalid_falls_back_to_top_level() -> None:
     assert occurrences[0].occurrence_id == "e:2026-03-10T01:00:00+00:00"
 
 
-def test_fetch_json(monkeypatch) -> None:
-    seen: dict = {}
+def test_fetch_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
 
     class FakeResponse:
         def raise_for_status(self) -> None:
             seen["raised"] = True
 
-        def json(self):
+        def json(self) -> object:
             return {"events": []}
 
-    def fake_get(url, timeout=None):
+    def fake_get(url: str, timeout: float | None = None) -> FakeResponse:
         seen["url"] = url
         seen["timeout"] = timeout
         return FakeResponse()

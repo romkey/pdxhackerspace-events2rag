@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from datetime import UTC, datetime, timedelta, timezone
 
 from events2rag.datetime_utils import ensure_utc, parse_datetime
@@ -30,5 +28,5 @@ def test_parse_datetime_datetime_passthrough() -> None:
 
 
 def test_ensure_utc_naive() -> None:
-    naive = datetime(2026, 3, 1, 10, 0)
+    naive = datetime(2026, 3, 1, 10, 0)  # noqa: DTZ001 - testing naive input
     assert ensure_utc(naive) == datetime(2026, 3, 1, 10, 0, tzinfo=UTC)

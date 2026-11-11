@@ -1,10 +1,11 @@
-from __future__ import annotations
-
-from contextlib import suppress
-from dataclasses import dataclass
+import threading
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
+from pytest_mock import MockerFixture
 
 from events2rag.config import Settings
 from events2rag.models import EventOccurrence, EventSummary
@@ -20,7 +21,7 @@ from events2rag.service import (
 class FakeEmbedder:
     dimension: int = 3
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
         return [[float(len(text)), 1.0, 0.0] for text in texts]
 
 
@@ -35,15 +36,13 @@ class FakeStore:
     def ensure_collection(self, vector_size: int) -> None:
         self.collection_size = vector_size
 
-    def get_existing_metadata(
-        self, point_ids: list[str]
-    ) -> dict[str, dict]:
+    def get_existing_metadata(self, point_ids: list[str]) -> dict[str, dict[str, Any]]:
         return {}
 
     def upsert_occurrences(
         self,
-        occurrences: list[EventOccurrence],
-        vectors: list[list[float]],
+        occurrences: Sequence[EventOccurrence],
+        vectors: Sequence[list[float]],
     ) -> int:
         self.upserted_occurrences = list(occurrences)
         self.occurrence_vectors = list(vectors)
@@ -51,18 +50,16 @@ class FakeStore:
 
     def upsert_event_summaries(
         self,
-        summaries: list[EventSummary],
-        vectors: list[list[float]],
+        summaries: Sequence[EventSummary],
+        vectors: Sequence[list[float]],
     ) -> int:
         self.upserted_summaries = list(summaries)
         self.summary_vectors = list(vectors)
         return len(summaries)
 
 
-def test_run_cycle_dedupes_and_enriches(mocker) -> None:
-    settings = Settings(
-        events_json_url="https://example.com/events.json"
-    )
+def test_run_cycle_dedupes_and_enriches(mocker: MockerFixture) -> None:
+    settings = Settings(events_json_url="https://example.com/events.json")
     start = datetime(2026, 4, 1, 18, 0, tzinfo=UTC)
     end = datetime(2026, 4, 1, 20, 0, tzinfo=UTC)
     duplicate = EventOccurrence(
@@ -85,9 +82,7 @@ def test_run_cycle_dedupes_and_enriches(mocker) -> None:
     )
 
     store = FakeStore()
-    service = IngestionService(
-        settings=settings, store=store, embedder=FakeEmbedder()
-    )
+    service = IngestionService(settings=settings, store=store, embedder=FakeEmbedder())
 
     upserted = service.run_cycle()
     assert upserted == 2
@@ -106,74 +101,63 @@ def test_run_cycle_dedupes_and_enriches(mocker) -> None:
     assert store.collection_size == 3
 
 
-def test_run_forever_sleeps_between_cycles(mocker) -> None:
-    settings = Settings(
-        events_json_url="https://example.com/events.json",
-        poll_interval_seconds=123,
-    )
-    mocker.patch(
-        "events2rag.service.fetch_json",
-        return_value={"events": []},
-    )
-    mocker.patch(
-        "events2rag.service.parse_event_occurrences",
-        return_value=[],
-    )
+class StopAfter(threading.Event):
+    """A stop event that sets itself after `cycles` waits, recording them."""
 
-    store = FakeStore()
+    def __init__(self, cycles: int) -> None:
+        super().__init__()
+        self.cycles = cycles
+        self.waits: list[float | None] = []
+
+    def wait(self, timeout: float | None = None) -> bool:
+        self.waits.append(timeout)
+        if len(self.waits) >= self.cycles:
+            self.set()
+        return self.is_set()
+
+
+def test_run_forever_waits_between_cycles_until_stopped(
+    mocker: MockerFixture,
+) -> None:
+    settings = Settings(poll_interval_seconds=123)
     service = IngestionService(
-        settings=settings, store=store, embedder=FakeEmbedder()
+        settings=settings, store=FakeStore(), embedder=FakeEmbedder()
     )
+    run_cycle = mocker.patch.object(service, "run_cycle", return_value=0)
+    stop = StopAfter(cycles=2)
 
-    sleep_calls: list[float] = []
+    service.run_forever(stop)
 
-    def fake_sleep(seconds: float) -> None:
-        sleep_calls.append(seconds)
-        raise KeyboardInterrupt()
-
-    with suppress(KeyboardInterrupt):
-        service.run_forever(sleep_fn=fake_sleep)
-    assert sleep_calls == [123]
+    assert run_cycle.call_count == 2
+    assert stop.waits == [123, 123]
 
 
-def test_run_forever_survives_transient_errors(mocker) -> None:
-    settings = Settings(
-        events_json_url="https://example.com/events.json"
-    )
-    call_count = 0
-
-    def flaky_fetch(*_args, **_kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            raise ConnectionError("network down")
-        return {"events": []}
-
-    mocker.patch(
-        "events2rag.service.fetch_json", side_effect=flaky_fetch
-    )
-    mocker.patch(
-        "events2rag.service.parse_event_occurrences", return_value=[]
-    )
-
-    store = FakeStore()
+def test_run_forever_does_nothing_when_already_stopped(
+    mocker: MockerFixture,
+) -> None:
     service = IngestionService(
-        settings=settings, store=store, embedder=FakeEmbedder()
+        settings=Settings(), store=FakeStore(), embedder=FakeEmbedder()
+    )
+    run_cycle = mocker.patch.object(service, "run_cycle")
+    stop = threading.Event()
+    stop.set()
+
+    service.run_forever(stop)
+
+    run_cycle.assert_not_called()
+
+
+def test_run_forever_survives_transient_errors(mocker: MockerFixture) -> None:
+    service = IngestionService(
+        settings=Settings(), store=FakeStore(), embedder=FakeEmbedder()
+    )
+    run_cycle = mocker.patch.object(
+        service, "run_cycle", side_effect=[ConnectionError("network down"), 0]
     )
 
-    sleep_count = 0
+    service.run_forever(StopAfter(cycles=2))
 
-    def counted_sleep(seconds: float) -> None:
-        nonlocal sleep_count
-        sleep_count += 1
-        if sleep_count >= 2:
-            raise KeyboardInterrupt()
-
-    with suppress(KeyboardInterrupt):
-        service.run_forever(sleep_fn=counted_sleep)
-
-    assert call_count == 2
-    assert sleep_count == 2
+    assert run_cycle.call_count == 2
 
 
 def test_cross_source_dedup_prefers_json() -> None:
@@ -206,10 +190,8 @@ def test_cross_source_dedup_prefers_json() -> None:
     assert result[0].description == "JSON description"
 
 
-def test_summary_uses_canonical_occurrence(mocker) -> None:
-    settings = Settings(
-        events_json_url="https://example.com/events.json"
-    )
+def test_summary_uses_canonical_occurrence(mocker: MockerFixture) -> None:
+    settings = Settings(events_json_url="https://example.com/events.json")
     old_occ = EventOccurrence(
         occurrence_id="e1:occ1",
         event_id="e1",
@@ -242,9 +224,7 @@ def test_summary_uses_canonical_occurrence(mocker) -> None:
     )
 
     store = FakeStore()
-    service = IngestionService(
-        settings=settings, store=store, embedder=FakeEmbedder()
-    )
+    service = IngestionService(settings=settings, store=store, embedder=FakeEmbedder())
     service.run_cycle()
 
     summary = store.upserted_summaries[0]
@@ -253,62 +233,58 @@ def test_summary_uses_canonical_occurrence(mocker) -> None:
     assert summary.source_url == "https://example.com"
 
 
-def _occ(**overrides) -> EventOccurrence:
-    values = {
-        "occurrence_id": "e1:1",
-        "event_id": "e1",
-        "title": "Title",
-        "description": "Desc",
-        "start_time": datetime(2026, 3, 1, 18, tzinfo=UTC),
-        "end_time": None,
-        "location": None,
-        "source_url": None,
-    }
-    values.update(overrides)
-    return EventOccurrence(**values)
+_BASE_OCCURRENCE = EventOccurrence(
+    occurrence_id="e1:1",
+    event_id="e1",
+    title="Title",
+    description="Desc",
+    start_time=datetime(2026, 3, 1, 18, tzinfo=UTC),
+    end_time=None,
+    location=None,
+    source_url=None,
+)
+
+
+# Any: each override is a different EventOccurrence field type.
+def _occ(**overrides: Any) -> EventOccurrence:
+    return replace(_BASE_OCCURRENCE, **overrides)
 
 
 class MetadataStore(FakeStore):
-    def __init__(self, existing: dict[str, dict]) -> None:
+    def __init__(self, existing: dict[str, dict[str, Any]]) -> None:
         super().__init__()
         self.existing = existing
 
-    def get_existing_metadata(
-        self, point_ids: list[str]
-    ) -> dict[str, dict]:
+    def get_existing_metadata(self, point_ids: list[str]) -> dict[str, dict[str, Any]]:
         return {pid: self.existing[pid] for pid in point_ids if pid in self.existing}
 
 
-def _service(store: FakeStore, **settings_kwargs) -> IngestionService:
+# Any: each keyword is a different Settings field type.
+def _service(store: FakeStore, **settings_kwargs: Any) -> IngestionService:
     settings = Settings(
         events_json_url="https://example.com/events.json", **settings_kwargs
     )
-    return IngestionService(
-        settings=settings, store=store, embedder=FakeEmbedder()
-    )
+    return IngestionService(settings=settings, store=store, embedder=FakeEmbedder())
 
 
-def test_run_cycle_returns_zero_when_no_events(mocker) -> None:
+def test_run_cycle_returns_zero_when_no_events(mocker: MockerFixture) -> None:
     mocker.patch("events2rag.service.fetch_json", return_value=[])
     store = FakeStore()
     assert _service(store).run_cycle() == 0
     assert store.upserted_summaries == []
 
 
-def test_run_forever_propagates_keyboard_interrupt(mocker) -> None:
-    store = FakeStore()
-    service = _service(store)
-    mocker.patch.object(
-        service, "run_cycle", side_effect=KeyboardInterrupt
-    )
-    sleep = mocker.Mock()
+def test_run_forever_propagates_keyboard_interrupt(mocker: MockerFixture) -> None:
+    service = _service(FakeStore())
+    mocker.patch.object(service, "run_cycle", side_effect=KeyboardInterrupt)
+    stop = StopAfter(cycles=1)
 
     with pytest.raises(KeyboardInterrupt):
-        service.run_forever(sleep_fn=sleep)
-    sleep.assert_not_called()
+        service.run_forever(stop)
+    assert stop.waits == []
 
 
-def test_filter_changed_skips_unchanged_occurrences(mocker) -> None:
+def test_filter_changed_skips_unchanged_occurrences(mocker: MockerFixture) -> None:
     ingested = datetime(2026, 2, 1, tzinfo=UTC)
     new = _occ(occurrence_id="new")
     no_last_modified = _occ(occurrence_id="no-lm")
@@ -344,13 +320,11 @@ def test_filter_changed_skips_unchanged_occurrences(mocker) -> None:
 
 
 def test_run_cycle_with_nothing_changed_still_upserts_summaries(
-    mocker,
+    mocker: MockerFixture,
 ) -> None:
     occ = _occ(occurrence_id="same")
     mocker.patch("events2rag.service.fetch_json", return_value=[])
-    mocker.patch(
-        "events2rag.service.parse_event_occurrences", return_value=[occ]
-    )
+    mocker.patch("events2rag.service.parse_event_occurrences", return_value=[occ])
     store = MetadataStore(
         {_to_point_id("same"): {"ingested_at": "2026-01-01T00:00:00+00:00"}}
     )
@@ -360,19 +334,15 @@ def test_run_cycle_with_nothing_changed_still_upserts_summaries(
     assert len(store.upserted_summaries) == 1
 
 
-def test_collect_occurrences_includes_ics_feed(mocker) -> None:
+def test_collect_occurrences_includes_ics_feed(mocker: MockerFixture) -> None:
     json_occ = _occ(occurrence_id="json", title="From JSON")
-    ics_occ = _occ(
-        occurrence_id="ics", title="From ICS", source_type="ics"
-    )
+    ics_occ = _occ(occurrence_id="ics", title="From ICS", source_type="ics")
     mocker.patch("events2rag.service.fetch_json", return_value=[])
     mocker.patch(
         "events2rag.service.parse_event_occurrences",
         return_value=[json_occ],
     )
-    fetch_ics = mocker.patch(
-        "events2rag.service.fetch_ics", return_value="ICS"
-    )
+    fetch_ics = mocker.patch("events2rag.service.fetch_ics", return_value="ICS")
     parse_ics = mocker.patch(
         "events2rag.service.parse_ics_occurrences",
         return_value=[ics_occ],
@@ -401,14 +371,12 @@ def test_embed_batches_splits_and_truncates() -> None:
     calls: list[list[str]] = []
 
     class RecordingEmbedder(FakeEmbedder):
-        def embed(self, texts: list[str]) -> list[list[float]]:
+        def embed(self, texts: Sequence[str]) -> list[list[float]]:
             calls.append(list(texts))
             return super().embed(texts)
 
     service = IngestionService(
-        settings=Settings(
-            embedding_batch_size=2, embedding_context_length=2
-        ),
+        settings=Settings(embedding_batch_size=2, embedding_context_length=2),
         store=FakeStore(),
         embedder=RecordingEmbedder(),
     )
@@ -436,7 +404,6 @@ def test_next_occurrence_start_prefers_future_else_latest() -> None:
 
     assert _next_occurrence_start([past_a, past_b], now) == past_b.start_time
     assert (
-        _next_occurrence_start([past_a, future_a, future_b], now)
-        == future_b.start_time
+        _next_occurrence_start([past_a, future_a, future_b], now) == future_b.start_time
     )
     assert _next_occurrence_start([], now) is None

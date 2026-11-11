@@ -1,17 +1,16 @@
-from __future__ import annotations
-
 import logging
-import time
-from collections.abc import Callable
+import threading
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
+from typing import Any, Protocol
 
 from events2rag.config import Settings
 from events2rag.embedder import Embedder
 from events2rag.ics_feed import fetch_ics, parse_ics_occurrences
 from events2rag.json_feed import fetch_json, parse_event_occurrences
 from events2rag.models import EventOccurrence, EventSummary
-from events2rag.qdrant_store import QdrantStore, _to_point_id
+from events2rag.qdrant_store import _to_point_id
 from events2rag.text_utils import (
     estimate_frequency,
     human_duration,
@@ -24,11 +23,30 @@ logger = logging.getLogger(__name__)
 _MIN_DATETIME = datetime.min.replace(tzinfo=UTC)
 
 
+class Store(Protocol):
+    """What the service needs from the vector store (QdrantStore)."""
+
+    def ensure_collection(self, vector_size: int) -> None: ...
+
+    # Values are Qdrant point payloads: JSON whose shape varies by field.
+    def get_existing_metadata(
+        self, point_ids: list[str]
+    ) -> dict[str, dict[str, Any]]: ...
+
+    def upsert_occurrences(
+        self, occurrences: Sequence[EventOccurrence], vectors: Sequence[list[float]]
+    ) -> int: ...
+
+    def upsert_event_summaries(
+        self, summaries: Sequence[EventSummary], vectors: Sequence[list[float]]
+    ) -> int: ...
+
+
 class IngestionService:
     def __init__(
         self,
         settings: Settings,
-        store: QdrantStore,
+        store: Store,
         embedder: Embedder,
     ) -> None:
         self._settings = settings
@@ -36,18 +54,16 @@ class IngestionService:
         self._embedder = embedder
         self._store.ensure_collection(vector_size=self._embedder.dimension)
 
-    def run_forever(
-        self,
-        sleep_fn: Callable[[float], None] = time.sleep,
-    ) -> None:
-        while True:
+    def run_forever(self, stop: threading.Event) -> None:
+        """Run a cycle every poll interval until `stop` is set."""
+        while not stop.is_set():
             try:
                 self.run_cycle()
-            except KeyboardInterrupt:
-                raise
+            # A failed cycle (feed down, Qdrant restarting, bad data) must not
+            # kill the service; it's logged with its traceback and retried.
             except Exception:
                 logger.exception("Ingestion cycle failed; will retry.")
-            sleep_fn(self._settings.poll_interval_seconds)
+            stop.wait(self._settings.poll_interval_seconds)
 
     def run_cycle(self) -> int:
         occurrences = self._collect_occurrences()
@@ -62,26 +78,19 @@ class IngestionService:
 
         to_embed = self._filter_changed(enriched)
         if to_embed:
-            vectors = self._embed_batches(
-                [occ.embedding_text() for occ in to_embed]
-            )
-            upserted_occurrences = self._store.upsert_occurrences(
-                to_embed, vectors
-            )
+            vectors = self._embed_batches([occ.embedding_text() for occ in to_embed])
+            upserted_occurrences = self._store.upsert_occurrences(to_embed, vectors)
         else:
             upserted_occurrences = 0
 
         summaries = _build_event_summaries(enriched, now)
-        summary_vectors = self._embed_batches(
-            [s.embedding_text() for s in summaries]
-        )
+        summary_vectors = self._embed_batches([s.embedding_text() for s in summaries])
         upserted_summaries = self._store.upsert_event_summaries(
             summaries, summary_vectors
         )
 
         logger.info(
-            "Upserted %s occurrences (%s skipped unchanged) "
-            "and %s event summaries.",
+            "Upserted %s occurrences (%s skipped unchanged) and %s event summaries.",
             upserted_occurrences,
             len(enriched) - len(to_embed),
             upserted_summaries,
@@ -92,9 +101,7 @@ class IngestionService:
         self, occurrences: list[EventOccurrence]
     ) -> list[EventOccurrence]:
         """Skip re-embedding occurrences whose last_modified hasn't changed."""
-        point_ids = [
-            _to_point_id(occ.occurrence_id) for occ in occurrences
-        ]
+        point_ids = [_to_point_id(occ.occurrence_id) for occ in occurrences]
         existing = self._store.get_existing_metadata(point_ids)
 
         changed: list[EventOccurrence] = []
@@ -144,9 +151,7 @@ class IngestionService:
 
     def _embed_batches(self, texts: list[str]) -> list[list[float]]:
         max_tokens = self._settings.embedding_context_length
-        safe_texts = [
-            truncate_for_embedding(t, max_tokens, logger) for t in texts
-        ]
+        safe_texts = [truncate_for_embedding(t, max_tokens, logger) for t in texts]
         vectors: list[list[float]] = []
         batch_size = max(1, self._settings.embedding_batch_size)
         for index in range(0, len(safe_texts), batch_size):
@@ -191,9 +196,7 @@ def _enrich_occurrences(
     for occ in occurrences:
         status = temporal_status(occ.start_time, occ.end_time, now)
         duration = human_duration(occ.start_time, occ.end_time)
-        enriched.append(
-            replace(occ, temporal_status=status, duration=duration)
-        )
+        enriched.append(replace(occ, temporal_status=status, duration=duration))
     return enriched
 
 
@@ -212,16 +215,9 @@ def _build_event_summaries(
         )
         next_start = _next_occurrence_start(event_occurrences, now)
         has_future = any(
-            occ.temporal_status in ("future", "current")
-            for occ in event_occurrences
+            occ.temporal_status in ("future", "current") for occ in event_occurrences
         )
-        locations = sorted(
-            {
-                occ.location
-                for occ in event_occurrences
-                if occ.location
-            }
-        )
+        locations = sorted({occ.location for occ in event_occurrences if occ.location})
         tags = sorted(
             {
                 tag
@@ -235,9 +231,7 @@ def _build_event_summaries(
             for occ in event_occurrences
             if occ.last_modified is not None
         ]
-        freq = estimate_frequency(
-            [occ.start_time for occ in event_occurrences]
-        )
+        freq = estimate_frequency([occ.start_time for occ in event_occurrences])
         summaries.append(
             EventSummary(
                 event_id=event_id,
@@ -263,9 +257,7 @@ def _next_occurrence_start(
     occurrences: list[EventOccurrence], now: datetime
 ) -> datetime | None:
     future_times = sorted(
-        occ.start_time
-        for occ in occurrences
-        if occ.start_time >= now
+        occ.start_time for occ in occurrences if occ.start_time >= now
     )
     if future_times:
         return future_times[0]
