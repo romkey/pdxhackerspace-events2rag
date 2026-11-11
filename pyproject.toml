@@ -3,37 +3,41 @@ name = "events2rag"
 version = "0.5.2"
 description = "Ingest events JSON/ICS feeds and upsert vectors to Qdrant."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
   "python-dateutil>=2.9.0.post0",
-  "requests>=2.32.0",
-  "qdrant-client>=1.15.0",
-  "icalendar>=6.1.0",
-  "recurring-ical-events>=3.5.0",
-  "beautifulsoup4>=4.12.0"
+  "requests>=2.34.2",
+  "qdrant-client>=1.20.0",
+  "icalendar>=7.3.0",
+  "recurring-ical-events>=3.8.2",
+  "beautifulsoup4>=4.15.0"
 ]
 
 [project.optional-dependencies]
 onnx = [
-  "numpy>=1.26.0",
-  "onnxruntime>=1.19.0",
-  "tokenizers>=0.20.0",
-  "huggingface-hub>=0.20.0"
+  "numpy>=2.5.4",
+  "onnxruntime>=1.31.1",
+  "tokenizers>=0.23.3",
+  "huggingface-hub>=2.4.0"
 ]
 torch = [
-  "sentence-transformers>=3.0.0"
+  "sentence-transformers>=6.3.0"
 ]
 dev = [
-  "pytest>=8.3.0",
-  "pytest-mock>=3.14.0",
-  "ruff>=0.11.0"
+  "numpy>=2.5.4",
+  "pytest>=9.2.0",
+  "pytest-cov>=7.1.0",
+  "pytest-mock>=3.17.0",
+  "ruff>=0.17.4"
 ]
 
 [project.scripts]
 events2rag = "events2rag.main:main"
 
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
@@ -45,9 +49,19 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.coverage.run]
+source = ["events2rag"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 95
+exclude_also = ["if __name__ == .__main__.:"]
+
 [tool.ruff]
 line-length = 88
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

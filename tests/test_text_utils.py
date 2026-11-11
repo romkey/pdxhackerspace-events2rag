@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from events2rag.text_utils import (
     collapse_whitespace,
@@ -150,3 +150,59 @@ def test_truncate_for_embedding_logs_warning(caplog) -> None:
     with caplog.at_level(logging.WARNING, logger="test_truncate"):
         truncate_for_embedding(text, max_tokens=10, logger=log)
     assert "Truncated" in caplog.text
+
+
+def test_human_duration_minutes_only() -> None:
+    start = datetime(2026, 3, 1, 18, 0, tzinfo=UTC)
+    assert human_duration(start, start + timedelta(minutes=45)) == "45 minutes"
+
+
+def test_human_duration_none_when_end_not_after_start() -> None:
+    start = datetime(2026, 3, 1, 18, 0, tzinfo=UTC)
+    assert human_duration(start, start) is None
+    assert human_duration(start, start - timedelta(hours=1)) is None
+
+
+def test_human_duration_days() -> None:
+    start = datetime(2026, 3, 1, 18, 0, tzinfo=UTC)
+    assert human_duration(start, start + timedelta(days=1)) == "1 day"
+    assert human_duration(start, start + timedelta(days=2)) == "2 days"
+    assert (
+        human_duration(start, start + timedelta(days=1, hours=1))
+        == "1 day, 1 hour"
+    )
+    assert (
+        human_duration(start, start + timedelta(days=2, hours=5))
+        == "2 days, 5 hours"
+    )
+
+
+def test_human_duration_single_hour() -> None:
+    start = datetime(2026, 3, 1, 18, 0, tzinfo=UTC)
+    assert human_duration(start, start + timedelta(hours=1)) == "1 hour"
+    assert (
+        human_duration(start, start + timedelta(hours=1, minutes=30))
+        == "1 hour, 30 minutes"
+    )
+
+
+def test_estimate_frequency_daily() -> None:
+    times = [datetime(2026, 3, day, tzinfo=UTC) for day in (1, 2, 3)]
+    assert estimate_frequency(times) == "daily"
+
+
+def test_estimate_frequency_occasional() -> None:
+    times = [
+        datetime(2026, 1, 1, tzinfo=UTC),
+        datetime(2026, 6, 1, tzinfo=UTC),
+    ]
+    assert estimate_frequency(times) == "occasional"
+
+
+def test_estimate_frequency_is_order_independent() -> None:
+    times = [
+        datetime(2026, 3, 15, tzinfo=UTC),
+        datetime(2026, 3, 1, tzinfo=UTC),
+        datetime(2026, 3, 8, tzinfo=UTC),
+    ]
+    assert estimate_frequency(times) == "weekly"

@@ -1,5 +1,10 @@
 # events2rag
 
+[![CI](https://github.com/romkey/pdxhackerspace-events2rag/actions/workflows/ci.yml/badge.svg)](https://github.com/romkey/pdxhackerspace-events2rag/actions/workflows/ci.yml)
+[![Lint](https://github.com/romkey/pdxhackerspace-events2rag/actions/workflows/lint.yml/badge.svg)](https://github.com/romkey/pdxhackerspace-events2rag/actions/workflows/lint.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.12 | 3.13 | 3.14 | 3.15](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14%20%7C%203.15-blue.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
+
 Event feed ingester for RAG. It fetches a JSON event feed (and optional ICS feed), turns events into embeddings, and upserts them into Qdrant on a recurring schedule.
 
 ## Features
@@ -22,7 +27,7 @@ Event feed ingester for RAG. It fetches a JSON event feed (and optional ICS feed
 | Backend | Install | Image size | Description |
 |---------|---------|------------|-------------|
 | `ollama` (default) | base | ~150 MB | Calls an external Ollama server |
-| `onnx` | `pip install .[onnx]` | ~350 MB | In-process ONNX Runtime |
+| `onnx` | `pip install .[onnx]` | ~350 MB | In-process ONNX Runtime (no Python 3.15 wheels yet) |
 | `sentence-transformers` | `pip install .[torch]` | ~1+ GB | Full PyTorch stack |
 
 ## Configuration
@@ -57,12 +62,23 @@ The ingester expects Ollama to be reachable at `OLLAMA_URL`. If Ollama runs on t
 
 ## Local development
 
+Requires Python 3.12 or newer (the Docker image uses 3.15).
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 events2rag
 ```
+
+Run lint and tests with coverage:
+
+```bash
+ruff check src tests
+pytest --cov
+```
+
+The test suite enforces at least 95% coverage.
 
 ## Run lint and tests in containers
 
@@ -73,7 +89,8 @@ docker compose -f docker-compose.dev.yml run --rm test
 
 ## GitHub Actions
 
-- `.github/workflows/ci.yml` runs lint and tests on pushes/PRs.
+- `.github/workflows/ci.yml` runs tests with coverage on Python 3.12–3.15 on pushes/PRs.
+- `.github/workflows/lint.yml` runs Ruff on pushes/PRs.
 - `.github/workflows/docker-publish.yml` builds and publishes to GHCR on semantic version tags.
 
 ### Semantic versioning and publishing
@@ -91,3 +108,7 @@ This publishes image tags like:
 - `ghcr.io/<owner>/<repo>:0.5`
 - `ghcr.io/<owner>/<repo>:0`
 - `ghcr.io/<owner>/<repo>:latest`
+
+## License
+
+Released under the [MIT License](LICENSE).
