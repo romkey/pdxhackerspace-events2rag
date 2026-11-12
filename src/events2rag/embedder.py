@@ -1,18 +1,81 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Literal, Protocol
 
 import requests
 
+from events2rag.text_utils import normalize_prefix, prepare_embedding_text
 
-class Embedder(Protocol):
+logger = logging.getLogger(__name__)
+
+EmbedKind = Literal["query", "document"]
+
+
+class EmbeddingBackend(Protocol):
+    """A raw embedding model: text in, vectors out, no prompting."""
+
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         ...
 
     @property
     def dimension(self) -> int:
         ...
+
+
+class Embedder(Protocol):
+    """An embedder that knows whether it is encoding queries or documents."""
+
+    def embed(
+        self, texts: Sequence[str], kind: EmbedKind = "document"
+    ) -> list[list[float]]:
+        ...
+
+    @property
+    def dimension(self) -> int:
+        ...
+
+
+class PromptedEmbedder:
+    """Wraps a backend, adding query/document prompt prefixes.
+
+    Many embedding models (nomic/ModernBERT, e5, mxbai, Qwen3-Embedding)
+    are trained with a task prefix on queries and/or documents and
+    retrieve noticeably worse without it. The prefix counts toward
+    ``max_tokens`` when the text is truncated.
+    """
+
+    def __init__(
+        self,
+        backend: EmbeddingBackend,
+        query_prefix: str = "",
+        document_prefix: str = "",
+        max_tokens: int = 512,
+    ) -> None:
+        self._backend = backend
+        self._prefixes: dict[str, str] = {
+            "query": normalize_prefix(query_prefix),
+            "document": normalize_prefix(document_prefix),
+        }
+        self._max_tokens = max_tokens
+
+    def prepare(self, text: str, kind: EmbedKind = "document") -> str:
+        """Return the exact string that will be sent to the model."""
+        return prepare_embedding_text(
+            text, self._prefixes[kind], self._max_tokens, logger
+        )
+
+    def embed(
+        self, texts: Sequence[str], kind: EmbedKind = "document"
+    ) -> list[list[float]]:
+        if kind not in self._prefixes:
+            raise ValueError(f"Unknown embed kind: {kind!r}")
+        return self._backend.embed([self.prepare(t, kind) for t in texts])
+
+    @property
+    def dimension(self) -> int:
+        return self._backend.dimension
 
 
 class OpenAIEmbedder:
@@ -25,7 +88,7 @@ class OpenAIEmbedder:
     def __init__(
         self,
         model_name: str,
-        base_url: str = "https://api.openai.com/v1",
+        base_url: str = "http://localhost:8080/v1",
         api_key: str | None = None,
         timeout: int = 120,
     ) -> None:

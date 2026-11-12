@@ -6,6 +6,8 @@ from events2rag.text_utils import (
     estimate_frequency,
     human_date,
     human_duration,
+    normalize_prefix,
+    prepare_embedding_text,
     strip_html,
     temporal_status,
     truncate_for_embedding,
@@ -150,3 +152,27 @@ def test_truncate_for_embedding_logs_warning(caplog) -> None:
     with caplog.at_level(logging.WARNING, logger="test_truncate"):
         truncate_for_embedding(text, max_tokens=10, logger=log)
     assert "Truncated" in caplog.text
+
+
+def test_normalize_prefix_adds_space_and_decodes_newlines() -> None:
+    assert normalize_prefix("") == ""
+    assert normalize_prefix("query:") == "query: "
+    assert normalize_prefix("query: ") == "query: "
+    assert (
+        normalize_prefix("Instruct: find events\\nQuery:")
+        == "Instruct: find events\nQuery: "
+    )
+
+
+def test_prepare_embedding_text_reserves_room_for_prefix() -> None:
+    text = " ".join(["word"] * 100)
+    result = prepare_embedding_text(text, "passage: ", max_tokens=20)
+    assert result.startswith("passage: ")
+    assert len(result) <= 20 * 3
+
+
+def test_prepare_embedding_text_without_prefix_matches_truncate() -> None:
+    text = " ".join(["word"] * 100)
+    assert prepare_embedding_text(text, "", 10) == truncate_for_embedding(
+        text, 10
+    )

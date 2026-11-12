@@ -3,7 +3,11 @@ from __future__ import annotations
 import logging
 
 from events2rag.config import Settings
-from events2rag.embedder import Embedder, OpenAIEmbedder
+from events2rag.embedder import (
+    EmbeddingBackend,
+    OpenAIEmbedder,
+    PromptedEmbedder,
+)
 from events2rag.qdrant_store import QdrantStore
 from events2rag.service import IngestionService
 
@@ -15,7 +19,16 @@ def configure_logging(level: str) -> None:
     )
 
 
-def build_embedder(settings: Settings) -> Embedder:
+def build_embedder(settings: Settings) -> PromptedEmbedder:
+    return PromptedEmbedder(
+        build_backend(settings),
+        query_prefix=settings.embedding_query_prefix,
+        document_prefix=settings.embedding_document_prefix,
+        max_tokens=settings.embedding_context_length,
+    )
+
+
+def build_backend(settings: Settings) -> EmbeddingBackend:
     backend = settings.embedding_backend
 
     if backend == "openai":
@@ -47,9 +60,12 @@ def main() -> None:
     configure_logging(settings.log_level)
     logger = logging.getLogger(__name__)
     logger.info(
-        "Starting ingester (backend=%s, model=%s)",
+        "Starting ingester (backend=%s, model=%s, "
+        "query_prefix=%r, document_prefix=%r)",
         settings.embedding_backend,
         settings.embedding_model_name,
+        settings.embedding_query_prefix,
+        settings.embedding_document_prefix,
     )
     embedder = build_embedder(settings)
     store = QdrantStore(
@@ -57,6 +73,7 @@ def main() -> None:
         api_key=settings.qdrant_api_key,
         collection_name=settings.qdrant_collection,
         distance_name=settings.qdrant_distance,
+        embedding_signature=settings.embedding_signature,
     )
     service = IngestionService(
         settings=settings, store=store, embedder=embedder

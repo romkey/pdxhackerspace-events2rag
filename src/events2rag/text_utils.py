@@ -118,6 +118,39 @@ def truncate_for_embedding(
     return truncated
 
 
+def normalize_prefix(prefix: str) -> str:
+    """Normalize an embedding prompt prefix from configuration.
+
+    Literal ``\\n`` sequences become newlines (so instruction-style
+    prompts fit on one env-var line), and a separating space is added
+    when the prefix doesn't already end in whitespace.
+    """
+    if not prefix:
+        return ""
+    prefix = prefix.replace("\\n", "\n")
+    if not prefix[-1].isspace():
+        prefix += " "
+    return prefix
+
+
+def prepare_embedding_text(
+    text: str,
+    prefix: str,
+    max_tokens: int,
+    logger: logging.Logger | None = None,
+) -> str:
+    """Prepend *prefix* to *text*, truncating so the result fits *max_tokens*.
+
+    The prefix counts toward the token budget, so the text is truncated
+    to whatever room remains after it.
+    """
+    if not prefix:
+        return truncate_for_embedding(text, max_tokens, logger)
+    prefix_tokens = -(-len(prefix) // _CHARS_PER_TOKEN)
+    remaining = max(1, max_tokens - prefix_tokens)
+    return prefix + truncate_for_embedding(text, remaining, logger)
+
+
 _WHITESPACE_RE = re.compile(r"\s+")
 
 

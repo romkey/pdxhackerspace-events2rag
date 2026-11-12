@@ -44,10 +44,12 @@ class QdrantStore:
         api_key: str | None,
         collection_name: str,
         distance_name: str = "Cosine",
+        embedding_signature: str | None = None,
     ) -> None:
         self._client = QdrantClient(url=url, api_key=api_key)
         self._collection_name = collection_name
         self._distance_name = distance_name
+        self._embedding_signature = embedding_signature
 
     def ensure_collection(self, vector_size: int) -> None:
         if not self._client.collection_exists(
@@ -83,13 +85,17 @@ class QdrantStore:
     def get_existing_metadata(
         self, point_ids: list[str]
     ) -> dict[str, dict]:
-        """Fetch ingested_at and last_modified for existing points."""
+        """Fetch change-detection fields for existing points."""
         if not point_ids:
             return {}
         results = self._client.retrieve(
             collection_name=self._collection_name,
             ids=point_ids,
-            with_payload=["ingested_at", "last_modified"],
+            with_payload=[
+                "ingested_at",
+                "last_modified",
+                "embedding_signature",
+            ],
             with_vectors=False,
         )
         return {
@@ -131,6 +137,7 @@ class QdrantStore:
                     if occ.last_modified
                     else None,
                     "ingested_at": now,
+                    "embedding_signature": self._embedding_signature,
                     "embedding_text": occ.embedding_text(),
                 },
             )
@@ -174,6 +181,7 @@ class QdrantStore:
                     if s.last_modified
                     else None,
                     "ingested_at": now,
+                    "embedding_signature": self._embedding_signature,
                     "embedding_text": s.embedding_text(),
                 },
             )

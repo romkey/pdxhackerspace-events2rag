@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from events2rag.text_utils import normalize_prefix
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -14,15 +16,29 @@ class Settings:
     qdrant_collection: str = "events"
     qdrant_distance: str = "Cosine"
     embedding_backend: str = "openai"
-    embedding_model_name: str = "text-embedding-3-small"
+    embedding_model_name: str = "nomic-ai/modernbert-embed-base"
     embedding_batch_size: int = 64
     embedding_context_length: int = 512
-    openai_base_url: str = "https://api.openai.com/v1"
+    embedding_query_prefix: str = "search_query: "
+    embedding_document_prefix: str = "search_document: "
+    openai_base_url: str = "http://localhost:8080/v1"
     openai_api_key: str | None = None
     ics_lookback_days: int = 30
     ics_lookahead_days: int = 365
     request_timeout_seconds: int = 30
     log_level: str = "INFO"
+
+    @property
+    def embedding_signature(self) -> str:
+        """Identifies how stored document vectors were produced.
+
+        Points whose stored signature differs are re-embedded, so
+        changing the model or document prefix refreshes every vector.
+        """
+        return (
+            f"{self.embedding_backend}|{self.embedding_model_name}|"
+            f"{normalize_prefix(self.embedding_document_prefix)}"
+        )
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -62,6 +78,12 @@ class Settings:
                     "EMBEDDING_CONTEXT_LENGTH",
                     str(cls.embedding_context_length),
                 )
+            ),
+            embedding_query_prefix=os.getenv(
+                "EMBEDDING_QUERY_PREFIX", cls.embedding_query_prefix
+            ),
+            embedding_document_prefix=os.getenv(
+                "EMBEDDING_DOCUMENT_PREFIX", cls.embedding_document_prefix
             ),
             openai_base_url=os.getenv(
                 "OPENAI_BASE_URL", cls.openai_base_url
