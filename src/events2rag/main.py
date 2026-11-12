@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from events2rag.config import Settings
-from events2rag.embedder import Embedder, OllamaEmbedder
+from events2rag.embedder import Embedder, OpenAIEmbedder
 from events2rag.qdrant_store import QdrantStore
 from events2rag.service import IngestionService
 
@@ -18,11 +18,11 @@ def configure_logging(level: str) -> None:
 def build_embedder(settings: Settings) -> Embedder:
     backend = settings.embedding_backend
 
-    if backend == "ollama":
-        return OllamaEmbedder(
+    if backend == "openai":
+        return OpenAIEmbedder(
             model_name=settings.embedding_model_name,
-            ollama_url=settings.ollama_url,
-            api_key=settings.ollama_api_key,
+            base_url=settings.openai_base_url,
+            api_key=settings.openai_api_key,
             timeout=settings.request_timeout_seconds,
         )
 

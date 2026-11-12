@@ -15,59 +15,51 @@ class Embedder(Protocol):
         ...
 
 
-class OllamaEmbedder:
-    """Embedding via Ollama's /api/embed endpoint."""
+class OpenAIEmbedder:
+    """Embedding via the OpenAI ``/v1/embeddings`` API.
+
+    Works against api.openai.com and any OpenAI-compatible server
+    (e.g. Ollama, vLLM, LM Studio) by changing ``base_url``.
+    """
 
     def __init__(
         self,
         model_name: str,
-        ollama_url: str = "http://ollama:11434",
+        base_url: str = "https://api.openai.com/v1",
         api_key: str | None = None,
         timeout: int = 120,
     ) -> None:
         self._model_name = model_name
-        self._url = ollama_url.rstrip("/") + "/api/embed"
+        self._url = base_url.rstrip("/") + "/embeddings"
         self._headers = (
             {"Authorization": f"Bearer {api_key}"} if api_key else None
         )
         self._timeout = timeout
-        self._dimension = self._probe_dimension()
+        self._dimension = len(self._request(["hello"])[0])
 
-    def _probe_dimension(self) -> int:
+    def _request(self, texts: list[str]) -> list[list[float]]:
         response = requests.post(
             self._url,
-            json={
-                "model": self._model_name,
-                "input": "hello",
-                "truncate": True,
-            },
+            json={"model": self._model_name, "input": texts},
             headers=self._headers,
             timeout=self._timeout,
         )
         response.raise_for_status()
-        data = response.json()
-        embeddings = data.get("embeddings") or data.get("embedding")
-        if not embeddings or not embeddings[0]:
+        items = response.json().get("data") or []
+        if len(items) != len(texts) or not all(
+            item.get("embedding") for item in items
+        ):
             raise ValueError(
-                f"Ollama returned no embeddings for model "
-                f"{self._model_name}"
+                f"OpenAI API returned {len(items)} embeddings for "
+                f"{len(texts)} inputs (model {self._model_name})"
             )
-        return len(embeddings[0])
+        items = sorted(items, key=lambda item: item.get("index", 0))
+        return [item["embedding"] for item in items]
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        response = requests.post(
-            self._url,
-            json={
-                "model": self._model_name,
-                "input": list(texts),
-                "truncate": True,
-            },
-            headers=self._headers,
-            timeout=self._timeout,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data.get("embeddings") or data.get("embedding")
+        if not texts:
+            return []
+        return self._request(list(texts))
 
     @property
     def dimension(self) -> int:
