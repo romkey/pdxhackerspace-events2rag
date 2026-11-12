@@ -1,7 +1,7 @@
 import logging
 import signal
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import pytest
@@ -10,6 +10,7 @@ from pytest_mock import MockerFixture
 from events2rag import __main__ as cli
 from events2rag import __version__
 from events2rag.config import Settings
+from events2rag.embedder import PromptedEmbedder
 
 
 class Recorder:
@@ -43,7 +44,7 @@ def test_configure_logging_sets_level(mocker: MockerFixture) -> None:
     assert basic_config.call_args.kwargs["level"] == "DEBUG"
 
 
-def test_build_embedder_openai(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_backend_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "OpenAIEmbedder", Recorder)
     settings = Settings(
         embedding_backend="openai",
@@ -53,7 +54,7 @@ def test_build_embedder_openai(monkeypatch: pytest.MonkeyPatch) -> None:
         request_timeout_seconds=9,
     )
 
-    result = cli.build_embedder(settings)
+    result = cli.build_backend(settings)
 
     assert isinstance(result, Recorder)
     assert result.kwargs == {
@@ -64,7 +65,7 @@ def test_build_embedder_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     }
 
 
-def test_build_embedder_onnx(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_backend_onnx(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "OnnxEmbedder", Recorder)
     settings = Settings(
         embedding_backend="onnx",
@@ -72,14 +73,14 @@ def test_build_embedder_onnx(monkeypatch: pytest.MonkeyPatch) -> None:
         embedding_context_length=128,
     )
 
-    result = cli.build_embedder(settings)
+    result = cli.build_backend(settings)
 
     assert isinstance(result, Recorder)
     assert result.args == ("m",)
     assert result.kwargs == {"max_length": 128}
 
 
-def test_build_embedder_sentence_transformers(
+def test_build_backend_sentence_transformers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(cli, "SentenceTransformerEmbedder", Recorder)
@@ -87,16 +88,16 @@ def test_build_embedder_sentence_transformers(
         embedding_backend="sentence-transformers", embedding_model_name="m"
     )
 
-    result = cli.build_embedder(settings)
+    result = cli.build_backend(settings)
 
     assert isinstance(result, Recorder)
     assert result.args == ("m",)
 
 
-def test_build_embedder_unknown_backend() -> None:
-    # Settings.from_env rejects this; build_embedder still guards itself.
+def test_build_backend_unknown_backend() -> None:
+    # Settings.from_env rejects this; build_backend still guards itself.
     with pytest.raises(ValueError, match="Unknown embedding backend"):
-        cli.build_embedder(Settings(embedding_backend="nope"))
+        cli.build_backend(Settings(embedding_backend="nope"))
 
 
 def test_main_wires_components_and_stops_on_sigterm(
@@ -136,9 +137,36 @@ def test_main_wires_components_and_stops_on_sigterm(
         api_key="qk",
         collection_name="c",
         distance_name="Dot",
+        embedding_signature=Settings.from_env().embedding_signature,
     )
     service_cls.assert_called_once_with(
         settings=mocker.ANY, store=store_cls.return_value, embedder=fake_embedder
     )
     assert len(stops) == 1
     assert signal.SIGINT in handlers
+
+
+def test_build_embedder_adds_configured_prefixes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[list[str]] = []
+
+    class Backend:
+        dimension = 2
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def embed(self, texts: Sequence[str]) -> list[list[float]]:
+            sent.append(list(texts))
+            return [[0.0, 1.0] for _ in texts]
+
+    monkeypatch.setattr(cli, "OpenAIEmbedder", Backend)
+
+    embedder = cli.build_embedder(Settings(embedding_query_prefix="q: "))
+    embedder.embed(["event"])
+    embedder.embed(["question"], "query")
+
+    assert isinstance(embedder, PromptedEmbedder)
+    assert embedder.dimension == 2
+    assert sent == [["search_document: event"], ["q: question"]]

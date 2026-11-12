@@ -9,6 +9,16 @@ file.
 
 ### Added
 
+- **Embedding prompt prefixes**: `EMBEDDING_QUERY_PREFIX` and
+  `EMBEDDING_DOCUMENT_PREFIX`, for models trained with task prefixes
+  (ModernBERT and nomic, e5, mxbai, Qwen3-Embedding). Events are embedded
+  as documents; the prefix counts toward `EMBEDDING_CONTEXT_LENGTH`.
+  `none` turns a prefix off. docs/configuration.md lists the prefixes for
+  common models, and the README shows how searchers add the query prefix.
+- Each stored occurrence records the backend, model and document prefix
+  it was embedded with; changing any of them re-embeds it on the next
+  cycle.
+
 - **The `openai` embedding backend** replaces `ollama` and is the default.
   It calls `POST {OPENAI_BASE_URL}/embeddings`, so it works with
   api.openai.com and any OpenAI-compatible server (Ollama's `/v1`, vLLM,
@@ -31,6 +41,14 @@ file.
   `LICENSE`.
 
 ### Changed
+
+- **The default model is ModernBERT Embed**
+  (`nomic-ai/modernbert-embed-base`, 768 dimensions) served by a local
+  OpenAI-compatible server: `OPENAI_BASE_URL` defaults to
+  `http://localhost:8080/v1` and the prefixes to `search_query:` /
+  `search_document:`. For OpenAI, set `OPENAI_BASE_URL`, the model, and
+  both prefixes to `none`. Occurrences stored before this release are
+  re-embedded once.
 
 - **Requires Python 3.14** (was 3.11); the image runs Python 3.14 on
   Debian trixie. Python 3.15 waits for onnxruntime wheels.

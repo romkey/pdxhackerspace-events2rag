@@ -59,13 +59,22 @@ Embedding backends, chosen with `EMBEDDING_BACKEND`:
 
 | Backend | Install | What it does |
 |---------|---------|--------------|
-| `openai` (default) | included | Calls the OpenAI embeddings API, or any OpenAI-compatible server (Ollama, vLLM, LM Studio) |
+| `openai` (default) | included | Calls an OpenAI-compatible embeddings API: a local server (text-embeddings-inference, vLLM, Ollama, LM Studio) or api.openai.com |
 | `onnx` | `pip install 'events2rag[onnx]'` | Runs the model in-process with ONNX Runtime |
 | `sentence-transformers` | `pip install 'events2rag[torch]'` | Runs the model with PyTorch |
 
-The Docker image includes only the `openai` backend. Changing the model
-changes the vector size, so point `QDRANT_COLLECTION` at a new collection
-(or drop the old one) when you switch.
+The Docker image includes only the `openai` backend. The default model is
+[ModernBERT Embed](https://huggingface.co/nomic-ai/modernbert-embed-base)
+(`nomic-ai/modernbert-embed-base`), served by a local OpenAI-compatible
+server. Changing the model changes the vector size, so point
+`QDRANT_COLLECTION` at a new collection (or drop the old one) when you
+switch.
+
+Events are embedded with `EMBEDDING_DOCUMENT_PREFIX` (default
+`search_document:`), the task prefix the model was trained with.
+[docs/configuration.md](docs/configuration.md#prompt-prefixes) lists the
+prefixes for other models. Changing the model or the document prefix
+re-embeds every stored occurrence on the next cycle.
 
 ```
 events2rag [--version]
@@ -73,21 +82,66 @@ events2rag [--version]
 
 ## Running it
 
-Requires Docker, and either an OpenAI API key or a local
-OpenAI-compatible server such as Ollama. Configuration comes from
-environment variables, kept in `.env` (see
+Requires Docker, and a local OpenAI-compatible server serving the
+embedding model (or an OpenAI API key). For example, Hugging Face
+text-embeddings-inference on port 8080:
+
+```bash
+docker run -d -p 8080:80 ghcr.io/huggingface/text-embeddings-inference:cpu-latest \
+  --model-id nomic-ai/modernbert-embed-base
+```
+
+Configuration comes from environment variables, kept in `.env` (see
 [docs/configuration.md](docs/configuration.md)):
 
 ```bash
-cp .env.example .env   # then edit it: at least OPENAI_API_KEY
+cp .env.example .env   # then edit it: at least OPENAI_BASE_URL
 docker compose -f docker-compose.prod.yaml up -d
 ```
 
 That runs the latest release from `ghcr.io/romkey/pdxhackerspace-events2rag`
 next to a Qdrant container; set `APP_VERSION=X.Y.Z` to pin a release. To
-use Ollama on the Docker host instead of OpenAI, set
-`OPENAI_BASE_URL=http://host.docker.internal:11434/v1`, leave
-`OPENAI_API_KEY` unset, and set `EMBEDDING_MODEL_NAME` to a model it serves.
+reach the server above from the container, set
+`OPENAI_BASE_URL=http://host.docker.internal:8080/v1`. For Ollama, use
+port 11434 and `EMBEDDING_MODEL_NAME=nomic-embed-text` (same prefixes).
+For OpenAI, set `OPENAI_BASE_URL=https://api.openai.com/v1`,
+`OPENAI_API_KEY`, `EMBEDDING_MODEL_NAME=text-embedding-3-small` and both
+prefixes to `none`.
+
+### Searching the collection
+
+Search with the same model, and add `EMBEDDING_QUERY_PREFIX` to the
+query: the stored events were embedded with the document prefix, and
+the model expects the matching query prefix. Without it, results get
+noticeably worse. With the defaults:
+
+```python
+import requests
+from qdrant_client import QdrantClient
+
+QUERY_PREFIX = "search_query: "  # EMBEDDING_QUERY_PREFIX, plus a space
+
+response = requests.post(
+    "http://localhost:8080/v1/embeddings",
+    json={
+        "model": "nomic-ai/modernbert-embed-base",
+        "input": [QUERY_PREFIX + "What's happening this weekend?"],
+    },
+    timeout=30,
+)
+response.raise_for_status()
+vector = response.json()["data"][0]["embedding"]
+
+hits = (
+    QdrantClient("http://localhost:6333")
+    .query_points("events", query=vector, limit=5)
+    .points
+)
+```
+
+Python code with events2rag installed can reuse its settings instead:
+`build_embedder(Settings.from_env()).embed([question], "query")`, from
+`events2rag.__main__` and `events2rag.config`.
 
 ### With pip
 

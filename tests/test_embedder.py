@@ -1,6 +1,6 @@
 import sys
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 from events2rag.embedder import (
     OnnxEmbedder,
     OpenAIEmbedder,
+    PromptedEmbedder,
     SentenceTransformerEmbedder,
     _mean_pool,
 )
@@ -73,7 +74,7 @@ def test_openai_embedder_probe_and_embed(monkeypatch: pytest.MonkeyPatch) -> Non
     assert embedder.dimension == 3
     vectors = embedder.embed(["hello", "world"])
     assert vectors == [[0.1, 0.2, 0.3]] * 2
-    assert calls[0]["url"] == "https://api.openai.com/v1/embeddings"
+    assert calls[0]["url"] == "http://localhost:8080/v1/embeddings"
     assert calls[0]["json"] == {"model": "test-model", "input": ["hello"]}
     assert calls[1]["json"]["input"] == ["hello", "world"]
     assert calls[1]["headers"] is None
@@ -321,3 +322,56 @@ def test_sentence_transformer_embedder_requires_dimension(
     monkeypatch.setattr(_FakeSentenceTransformer, "dimension", None)
     with pytest.raises(ValueError, match="dimension"):
         SentenceTransformerEmbedder("org/model")
+
+
+class RecordingBackend:
+    dimension = 2
+
+    def __init__(self) -> None:
+        self.sent: list[list[str]] = []
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        self.sent.append(list(texts))
+        return [[1.0, 0.0] for _ in texts]
+
+
+def test_prompted_embedder_prefixes_queries_and_documents() -> None:
+    backend = RecordingBackend()
+    embedder = PromptedEmbedder(
+        backend, query_prefix="search_query: ", document_prefix="search_document: "
+    )
+
+    assert embedder.embed(["doc"]) == [[1.0, 0.0]]
+    embedder.embed(["what's on tonight"], "query")
+
+    assert backend.sent == [
+        ["search_document: doc"],
+        ["search_query: what's on tonight"],
+    ]
+    assert embedder.dimension == 2
+
+
+def test_prompted_embedder_without_prefixes_sends_text_unchanged() -> None:
+    backend = RecordingBackend()
+    embedder = PromptedEmbedder(backend)
+
+    embedder.embed(["hello"], "query")
+    embedder.embed(["hello"], "document")
+
+    assert backend.sent == [["hello"], ["hello"]]
+
+
+def test_prompted_embedder_counts_prefix_toward_context_length() -> None:
+    prefix = "Represent this sentence for searching relevant passages: "
+    embedder = PromptedEmbedder(RecordingBackend(), query_prefix=prefix, max_tokens=30)
+
+    prepared = embedder.prepare("word " * 100, "query")
+
+    assert prepared.startswith(prefix)
+    assert len(prepared) <= 30 * 3
+
+
+def test_prompted_embedder_rejects_unknown_kind() -> None:
+    embedder = PromptedEmbedder(RecordingBackend())
+    with pytest.raises(ValueError, match="Unknown embed kind"):
+        embedder.prepare("x", "passage")  # type: ignore[arg-type]

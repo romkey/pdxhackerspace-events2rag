@@ -5,10 +5,10 @@
 #   docker compose up --build
 #   docker compose run --rm app bash  # a shell with everything installed
 #
-# The ingester calls the embeddings API at OPENAI_BASE_URL: set
-# OPENAI_API_KEY in .env, or point OPENAI_BASE_URL at a local
-# OpenAI-compatible server (Ollama on the Docker host:
-# http://host.docker.internal:11434/v1).
+# The ingester calls the embeddings API at OPENAI_BASE_URL: point it at a
+# local OpenAI-compatible server serving the model (on the Docker host:
+# http://host.docker.internal:8080/v1), or at api.openai.com with
+# OPENAI_API_KEY set.
 # Restart the app (docker compose restart app) to pick up code changes.
 # Tests, lint and production have their own compose files:
 #

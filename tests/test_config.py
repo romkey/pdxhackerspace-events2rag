@@ -20,6 +20,8 @@ def test_from_env_reads_all_variables() -> None:
         "EMBEDDING_MODEL_NAME": "some/model",
         "EMBEDDING_BATCH_SIZE": "8",
         "EMBEDDING_CONTEXT_LENGTH": "256",
+        "EMBEDDING_QUERY_PREFIX": "query:",
+        "EMBEDDING_DOCUMENT_PREFIX": "passage: ",
         "OPENAI_BASE_URL": "http://localhost:11434/v1",
         "OPENAI_API_KEY": "openai-key",
         "ICS_LOOKBACK_DAYS": "0",
@@ -40,6 +42,8 @@ def test_from_env_reads_all_variables() -> None:
         embedding_model_name="some/model",
         embedding_batch_size=8,
         embedding_context_length=256,
+        embedding_query_prefix="query: ",
+        embedding_document_prefix="passage: ",
         openai_base_url="http://localhost:11434/v1",
         openai_api_key="openai-key",
         ics_lookback_days=0,
@@ -57,6 +61,8 @@ def test_from_env_treats_empty_values_as_unset() -> None:
         "QDRANT_API_KEY": "",
         "QDRANT_DISTANCE": "",
         "OPENAI_API_KEY": "",
+        "EMBEDDING_QUERY_PREFIX": "",
+        "EMBEDDING_DOCUMENT_PREFIX": "",
         "LOG_LEVEL": "",
     }
     assert Settings.from_env(env) == Settings()
@@ -79,3 +85,41 @@ def test_from_env_treats_empty_values_as_unset() -> None:
 def test_from_env_rejects_bad_values(name: str, value: str, message: str) -> None:
     with pytest.raises(ConfigError, match=message):
         Settings.from_env({name: value})
+
+
+@pytest.mark.parametrize(
+    ("value", "prefix"),
+    [
+        ("none", ""),
+        ("None", ""),
+        ("query:", "query: "),
+        ("query: ", "query: "),
+        (
+            "Instruct: Find matching events\\nQuery:",
+            "Instruct: Find matching events\nQuery: ",
+        ),
+    ],
+)
+def test_from_env_reads_prefixes(value: str, prefix: str) -> None:
+    settings = Settings.from_env(
+        {"EMBEDDING_QUERY_PREFIX": value, "EMBEDDING_DOCUMENT_PREFIX": value}
+    )
+    assert settings.embedding_query_prefix == prefix
+    assert settings.embedding_document_prefix == prefix
+
+
+def test_embedding_signature_tracks_how_documents_are_embedded() -> None:
+    base = Settings()
+    assert base.embedding_signature == (
+        "openai|nomic-ai/modernbert-embed-base|search_document: "
+    )
+    for changed in (
+        Settings(embedding_backend="onnx"),
+        Settings(embedding_model_name="other"),
+        Settings(embedding_document_prefix=""),
+    ):
+        assert changed.embedding_signature != base.embedding_signature
+    assert (
+        Settings(embedding_query_prefix="").embedding_signature
+        == base.embedding_signature
+    )
