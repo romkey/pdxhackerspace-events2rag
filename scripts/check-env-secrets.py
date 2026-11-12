@@ -12,6 +12,7 @@ compose file. It names the file, line and variable, never the value.
 "not-a-secret" to a line to allow it.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -19,13 +20,21 @@ ALLOW = "not-a-secret"
 # Real secrets shorter than this are too likely to match ordinary text.
 MIN_SECRET_LENGTH = 8
 SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__"}
+# A commented-out assignment in an example file, such as "# QDRANT_URL=...".
+COMMENTED_ASSIGNMENT = re.compile(r"#\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*=")
 
 
-def parse_env(path: Path) -> dict[str, str]:
-    """KEY=value pairs from a dotenv file, unquoted."""
+def parse_env(path: Path, commented: bool = False) -> dict[str, str]:
+    """KEY=value pairs from a dotenv file, unquoted.
+
+    With commented, also reads commented-out assignments ("# KEY=value"),
+    which example files use for optional variables and their defaults.
+    """
     values = {}
     for line in path.read_text(errors="replace").splitlines():
         line = line.strip()
+        if commented and COMMENTED_ASSIGNMENT.match(line):
+            line = line.lstrip("#").strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.removeprefix("export ").split("=", 1)
@@ -51,7 +60,7 @@ def local_values(root: Path) -> dict[str, str]:
         value
         for path in files
         if path.name.endswith(".example")
-        for value in parse_env(path).values()
+        for value in parse_env(path, commented=True).values()
     }
     return {
         value: key
