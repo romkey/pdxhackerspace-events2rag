@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 import re
 from datetime import datetime, timedelta
@@ -18,9 +16,7 @@ def human_date(dt: datetime) -> str:
     return dt.strftime("%A, %B %-d, %Y at %-I:%M %p")
 
 
-def human_duration(
-    start: datetime, end: datetime | None
-) -> str | None:
+def human_duration(start: datetime, end: datetime | None) -> str | None:
     if end is None:
         return None
     delta = end - start
@@ -39,16 +35,11 @@ def human_duration(
             return f"{d}, {h}"
         return f"{days} day{'s' if days != 1 else ''}"
     if minutes:
-        return (
-            f"{hours} hour{'s' if hours != 1 else ''}, "
-            f"{minutes} minutes"
-        )
+        return f"{hours} hour{'s' if hours != 1 else ''}, {minutes} minutes"
     return f"{hours} hour{'s' if hours != 1 else ''}"
 
 
-def temporal_status(
-    start: datetime, end: datetime | None, now: datetime
-) -> str:
+def temporal_status(start: datetime, end: datetime | None, now: datetime) -> str:
     effective_end = end or start
     if effective_end < now:
         return "past"
@@ -108,8 +99,7 @@ def truncate_for_embedding(
     truncated = text[:max_chars].rsplit(" ", 1)[0]
     if logger:
         logger.warning(
-            "Truncated embedding text from %s to %s chars "
-            "(~%s token limit): %.60s…",
+            "Truncated embedding text from %s to %s chars (~%s token limit): %.60s…",
             len(text),
             len(truncated),
             max_tokens,

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 import requests
@@ -145,4 +143,3 @@ def _coerce_tags(value: Any) -> list[str]:
     if value is None:
         return []
     return [str(value)]
-

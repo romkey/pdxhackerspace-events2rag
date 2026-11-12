@@ -1,8 +1,7 @@
-from __future__ import annotations
-
 import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from qdrant_client import QdrantClient
@@ -50,17 +49,11 @@ class QdrantStore:
         self._distance_name = distance_name
 
     def ensure_collection(self, vector_size: int) -> None:
-        if not self._client.collection_exists(
-            collection_name=self._collection_name
-        ):
-            distance = DISTANCE_BY_NAME.get(
-                self._distance_name, Distance.COSINE
-            )
+        if not self._client.collection_exists(collection_name=self._collection_name):
+            distance = DISTANCE_BY_NAME.get(self._distance_name, Distance.COSINE)
             self._client.create_collection(
                 collection_name=self._collection_name,
-                vectors_config=VectorParams(
-                    size=vector_size, distance=distance
-                ),
+                vectors_config=VectorParams(size=vector_size, distance=distance),
             )
         self._ensure_payload_indexes()
 
@@ -80,9 +73,8 @@ class QdrantStore:
                         exc,
                     )
 
-    def get_existing_metadata(
-        self, point_ids: list[str]
-    ) -> dict[str, dict]:
+    # Values are Qdrant point payloads: JSON whose shape varies by field.
+    def get_existing_metadata(self, point_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Fetch ingested_at and last_modified for existing points."""
         if not point_ids:
             return {}
@@ -92,10 +84,7 @@ class QdrantStore:
             with_payload=["ingested_at", "last_modified"],
             with_vectors=False,
         )
-        return {
-            str(point.id): point.payload or {}
-            for point in results
-        }
+        return {str(point.id): point.payload or {} for point in results}
 
     def upsert_occurrences(
         self,
@@ -103,9 +92,7 @@ class QdrantStore:
         vectors: Sequence[list[float]],
     ) -> int:
         if len(occurrences) != len(vectors):
-            raise ValueError(
-                "occurrences and vectors must have equal lengths"
-            )
+            raise ValueError("occurrences and vectors must have equal lengths")
         now = datetime.now(tz=UTC).isoformat()
         points = [
             PointStruct(
@@ -118,9 +105,7 @@ class QdrantStore:
                     "title": occ.title,
                     "description": occ.description,
                     "start_time": occ.start_time.isoformat(),
-                    "end_time": occ.end_time.isoformat()
-                    if occ.end_time
-                    else None,
+                    "end_time": occ.end_time.isoformat() if occ.end_time else None,
                     "location": occ.location,
                     "source_url": occ.source_url,
                     "tags": occ.tags,
@@ -136,9 +121,7 @@ class QdrantStore:
             )
             for occ, vector in zip(occurrences, vectors, strict=True)
         ]
-        self._client.upsert(
-            collection_name=self._collection_name, points=points
-        )
+        self._client.upsert(collection_name=self._collection_name, points=points)
         return len(points)
 
     def upsert_event_summaries(
@@ -147,9 +130,7 @@ class QdrantStore:
         vectors: Sequence[list[float]],
     ) -> int:
         if len(summaries) != len(vectors):
-            raise ValueError(
-                "summaries and vectors must have equal lengths"
-            )
+            raise ValueError("summaries and vectors must have equal lengths")
         now = datetime.now(tz=UTC).isoformat()
         points = [
             PointStruct(
@@ -179,9 +160,7 @@ class QdrantStore:
             )
             for s, vector in zip(summaries, vectors, strict=True)
         ]
-        self._client.upsert(
-            collection_name=self._collection_name, points=points
-        )
+        self._client.upsert(collection_name=self._collection_name, points=points)
         return len(points)
 
 

@@ -1,0 +1,43 @@
+# Production: runs the released image from ghcr.io with a Qdrant beside it.
+# Configure it in .env next to this file (see .env.example and
+# docs/configuration.md).
+#
+#   docker compose -f docker-compose.prod.yaml up -d
+#   APP_VERSION=1.2.3 docker compose -f docker-compose.prod.yaml up -d   # pin a release
+#   docker compose -f docker-compose.prod.yaml build   # build the image locally instead
+#
+# The ingester listens on no port, so it has no /healthz health check;
+# `restart: unless-stopped` brings it back if it exits, and failed cycles
+# are logged and retried without exiting.
+
+services:
+  app:
+    image: ghcr.io/romkey/pdxhackerspace-events2rag:${APP_VERSION:-latest}
+    build:
+      context: .
+      target: production
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      QDRANT_URL: http://qdrant:6333
+    depends_on:
+      - qdrant
+    # Least privilege: nothing to write but /tmp, no capabilities.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  qdrant:
+    image: qdrant/qdrant:v1.20.0
+    restart: unless-stopped
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+volumes:
+  qdrant-data:

@@ -1,95 +1,147 @@
 # events2rag
 
-Event feed ingester for RAG. It fetches a JSON event feed (and optional ICS feed), turns events into embeddings, and upserts them into Qdrant on a recurring schedule.
+[![CI](https://github.com/romkey/pdxhackerspace-events2rag/actions/workflows/ci.yaml/badge.svg)](https://github.com/romkey/pdxhackerspace-events2rag/actions/workflows/ci.yaml)
+[![Lint](https://github.com/romkey/pdxhackerspace-events2rag/actions/workflows/lint.yaml/badge.svg)](https://github.com/romkey/pdxhackerspace-events2rag/actions/workflows/lint.yaml)
+[![Python 3.14](https://img.shields.io/badge/python-3.14-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Features
+Event feed ingester for retrieval-augmented generation (RAG). It fetches a
+JSON event feed (and optionally an ICS calendar), turns each event and each
+occurrence into an embedding, and upserts them into Qdrant, repeating every
+hour, so a chatbot or search tool can answer "what's happening at the
+hackerspace?" from current data.
 
-- Environment-variable configuration
-- Polling loop that rescans every hour by default
-- JSON feed ingestion (`EVENTS_JSON_URL`)
-- Optional ICS ingestion with recurrence expansion (`EVENTS_ICS_URL`)
-- HTML stripping from event descriptions
-- Human-friendly dates with day-of-week in embeddings
-- Duration and temporal status (past/current/future) per occurrence
-- Event-level summaries with frequency estimation
-- Qdrant payload indexes for hybrid vector + filter search
-- Resilient polling loop that survives transient errors
-- Dockerized runtime
-- GitHub Actions for CI and Docker image publishing
+> **AI disclosure:** This project was written by AI under human oversight,
+> following [these rules](https://github.com/romkey/python-ai-rules/blob/main/RULES.md).
 
-## Embedding backends
+## What's here
 
-| Backend | Install | Image size | Description |
-|---------|---------|------------|-------------|
-| `openai` (default) | base | ~150 MB | Calls the OpenAI embeddings API (or any OpenAI-compatible server) |
-| `onnx` | `pip install .[onnx]` | ~350 MB | In-process ONNX Runtime |
-| `sentence-transformers` | `pip install .[torch]` | ~1+ GB | Full PyTorch stack |
+| Path | What it is |
+|------|------------|
+| `src/events2rag/__main__.py` | Command line: reads settings, wires the parts together, handles SIGTERM |
+| `src/events2rag/config.py` | `Settings` from environment variables, validated |
+| `src/events2rag/json_feed.py` | Fetches the JSON feed and turns events into occurrences |
+| `src/events2rag/ics_feed.py` | Fetches the ICS feed and expands recurring events |
+| `src/events2rag/service.py` | One ingestion cycle: dedupe, enrich, skip unchanged, embed, upsert; the polling loop |
+| `src/events2rag/embedder.py` | Embedding backends: OpenAI API, ONNX Runtime, sentence-transformers |
+| `src/events2rag/qdrant_store.py` | Qdrant collection, payload indexes and upserts |
+| `src/events2rag/models.py` | `EventOccurrence` and `EventSummary`, and the text that gets embedded |
+| `src/events2rag/text_utils.py`, `datetime_utils.py` | HTML stripping, human-friendly dates and durations, frequency estimates |
+| `tests/` | pytest tests, one file per module |
+| `docs/` | [Configuration](docs/configuration.md) and an [overview](docs/overview.md) |
 
-## Configuration
+## Technical details
 
-Copy `.env.example` to `.env` and update values.
+Each cycle:
 
-Key variables:
+1. Fetches `EVENTS_JSON_URL` and, if set, `EVENTS_ICS_URL`. The JSON parser
+   accepts a list of events or an object holding one under `events`,
+   `data`, `items` or `results`, and common field names for titles, dates,
+   locations and tags. ICS recurrences are expanded from
+   `ICS_LOOKBACK_DAYS` ago to `ICS_LOOKAHEAD_DAYS` ahead.
+2. Strips HTML from descriptions, drops duplicates (preferring the JSON
+   copy when both feeds list the same title at the same time), and adds
+   each occurrence's duration and whether it's past, current or future.
+3. Skips occurrences whose `last_modified` hasn't changed since they were
+   last stored, embeds the rest, and upserts them with
+   `record_type: occurrence`.
+4. Builds one summary per event (next occurrence, locations, tags, an
+   estimated frequency such as "weekly") and upserts it with
+   `record_type: event_summary`.
 
-- `EVENTS_JSON_URL`: source JSON feed URL
-- `EVENTS_ICS_URL`: optional ICS feed URL
-- `POLL_INTERVAL_SECONDS`: scan interval (default `3600`)
-- `QDRANT_URL`: Qdrant endpoint
-- `QDRANT_COLLECTION`: collection name
-- `EMBEDDING_BACKEND`: `openai`, `onnx`, or `sentence-transformers`
-- `EMBEDDING_MODEL_NAME`: model name (default `text-embedding-3-small`)
-- `OPENAI_BASE_URL`: OpenAI-compatible API base URL (default `https://api.openai.com/v1`)
-- `OPENAI_API_KEY`: optional API key, sent as a bearer token (required for api.openai.com)
+Point IDs are UUIDs derived from the occurrence or event ID, so re-runs
+update points instead of duplicating them. Payload indexes on
+`record_type`, `temporal_status`, `tags`, `location`, `event_id`,
+`start_time`, `end_time` and `has_future_occurrences` allow filtered
+vector search. A failed cycle is logged and retried at the next interval.
 
-## Run with Docker Compose
+Embedding backends, chosen with `EMBEDDING_BACKEND`:
 
-```bash
-cp .env.example .env
-docker compose up --build
+| Backend | Install | What it does |
+|---------|---------|--------------|
+| `openai` (default) | included | Calls the OpenAI embeddings API, or any OpenAI-compatible server (Ollama, vLLM, LM Studio) |
+| `onnx` | `pip install 'events2rag[onnx]'` | Runs the model in-process with ONNX Runtime |
+| `sentence-transformers` | `pip install 'events2rag[torch]'` | Runs the model with PyTorch |
+
+The Docker image includes only the `openai` backend. Changing the model
+changes the vector size, so point `QDRANT_COLLECTION` at a new collection
+(or drop the old one) when you switch.
+
+```
+events2rag [--version]
 ```
 
-This starts:
+## Running it
 
-- `qdrant` on `localhost:6333`
-- `ingester` that fetches and upserts every hour
-
-The ingester calls the OpenAI embeddings API at `OPENAI_BASE_URL`. To use a local OpenAI-compatible server instead (such as Ollama), set `OPENAI_BASE_URL` to its `/v1` endpoint, e.g. `http://host.docker.internal:11434/v1`, leave `OPENAI_API_KEY` empty if the server does not need one, and set `EMBEDDING_MODEL_NAME` to a model it serves.
-
-Changing the embedding model changes the vector dimension; point `QDRANT_COLLECTION` at a new collection (or drop the old one) when switching models.
-
-## Local development
+Requires Docker, and either an OpenAI API key or a local
+OpenAI-compatible server such as Ollama. Configuration comes from
+environment variables, kept in `.env` (see
+[docs/configuration.md](docs/configuration.md)):
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+cp .env.example .env   # then edit it: at least OPENAI_API_KEY
+docker compose -f docker-compose.prod.yaml up -d
+```
+
+That runs the latest release from `ghcr.io/romkey/pdxhackerspace-events2rag`
+next to a Qdrant container; set `APP_VERSION=X.Y.Z` to pin a release. To
+use Ollama on the Docker host instead of OpenAI, set
+`OPENAI_BASE_URL=http://host.docker.internal:11434/v1`, leave
+`OPENAI_API_KEY` unset, and set `EMBEDDING_MODEL_NAME` to a model it serves.
+
+### With pip
+
+Needs Python 3.14 or newer. Install into a virtual environment from a
+release's wheel:
+
+```bash
+python3 -m venv ~/.venvs/events2rag
+~/.venvs/events2rag/bin/pip install https://github.com/romkey/pdxhackerspace-events2rag/releases/download/vX.Y.Z/events2rag-X.Y.Z-py3-none-any.whl
+~/.venvs/events2rag/bin/events2rag --version
+```
+
+Set its environment variables yourself (see
+[docs/configuration.md](docs/configuration.md)); it doesn't read `.env`.
+
+## Development
+
+With Docker, nothing else to install:
+
+```bash
+docker compose up --build                                  # run from the working tree, with Qdrant
+docker compose -f docker-compose.test.yaml run --rm test   # tests with coverage
+docker compose -f docker-compose.lint.yaml run --rm lint   # every lint check, as CI runs them
+```
+
+With [uv](https://docs.astral.sh/uv/), which installs the exact versions
+CI tests (`uv.lock`):
+
+```bash
+uv sync
+uv run pytest
+uv run mypy
+uv run events2rag
+```
+
+With pip (25.1 or newer, for `--group`). pip doesn't read `uv.lock`, so it
+may pick newer dependency versions than CI tested:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -e . --group dev
+pytest
+mypy
 events2rag
 ```
 
-## Run lint and tests in containers
+Either way, `uvx pre-commit install` (or `pip install pre-commit &&
+pre-commit install`) runs the lint checks on every commit. The tests fail
+below 95% coverage.
 
-```bash
-docker compose -f docker-compose.dev.yml run --rm lint
-docker compose -f docker-compose.dev.yml run --rm test
-```
+Releases: run the **Release** workflow from the Actions tab, then merge the
+release PR it opens; see [CHANGELOG.md](CHANGELOG.md).
 
-## GitHub Actions
+## License
 
-- `.github/workflows/ci.yml` runs lint and tests on pushes/PRs.
-- `.github/workflows/docker-publish.yml` builds and publishes to GHCR on semantic version tags.
-
-### Semantic versioning and publishing
-
-Create and push a git tag:
-
-```bash
-git tag v0.5.0
-git push origin v0.5.0
-```
-
-This publishes image tags like:
-
-- `ghcr.io/<owner>/<repo>:0.5.0`
-- `ghcr.io/<owner>/<repo>:0.5`
-- `ghcr.io/<owner>/<repo>:0`
-- `ghcr.io/<owner>/<repo>:latest`
+[MIT](LICENSE)
