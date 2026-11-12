@@ -21,7 +21,7 @@ Event feed ingester for RAG. It fetches a JSON event feed (and optional ICS feed
 
 | Backend | Install | Image size | Description |
 |---------|---------|------------|-------------|
-| `ollama` (default) | base | ~150 MB | Calls an external Ollama server |
+| `openai` (default) | base | ~150 MB | Calls the OpenAI embeddings API (or any OpenAI-compatible server) |
 | `onnx` | `pip install .[onnx]` | ~350 MB | In-process ONNX Runtime |
 | `sentence-transformers` | `pip install .[torch]` | ~1+ GB | Full PyTorch stack |
 
@@ -36,10 +36,10 @@ Key variables:
 - `POLL_INTERVAL_SECONDS`: scan interval (default `3600`)
 - `QDRANT_URL`: Qdrant endpoint
 - `QDRANT_COLLECTION`: collection name
-- `EMBEDDING_BACKEND`: `ollama`, `onnx`, or `sentence-transformers`
-- `EMBEDDING_MODEL_NAME`: model name (default `qllama/bge-small-en-v1.5`)
-- `OLLAMA_URL`: Ollama endpoint (default `http://ollama:11434`)
-- `OLLAMA_API_KEY`: optional bearer token for hosted/proxied Ollama APIs
+- `EMBEDDING_BACKEND`: `openai`, `onnx`, or `sentence-transformers`
+- `EMBEDDING_MODEL_NAME`: model name (default `text-embedding-3-small`)
+- `OPENAI_BASE_URL`: OpenAI-compatible API base URL (default `https://api.openai.com/v1`)
+- `OPENAI_API_KEY`: optional API key, sent as a bearer token (required for api.openai.com)
 
 ## Run with Docker Compose
 
@@ -53,7 +53,9 @@ This starts:
 - `qdrant` on `localhost:6333`
 - `ingester` that fetches and upserts every hour
 
-The ingester expects Ollama to be reachable at `OLLAMA_URL`. If Ollama runs on the Docker host, use `http://host.docker.internal:11434` or add it to the compose network.
+The ingester calls the OpenAI embeddings API at `OPENAI_BASE_URL`. To use a local OpenAI-compatible server instead (such as Ollama), set `OPENAI_BASE_URL` to its `/v1` endpoint, e.g. `http://host.docker.internal:11434/v1`, leave `OPENAI_API_KEY` empty if the server does not need one, and set `EMBEDDING_MODEL_NAME` to a model it serves.
+
+Changing the embedding model changes the vector dimension; point `QDRANT_COLLECTION` at a new collection (or drop the old one) when switching models.
 
 ## Local development
 
