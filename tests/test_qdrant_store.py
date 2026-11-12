@@ -110,6 +110,7 @@ def test_upsert_and_fetch_occurrence_metadata(store: QdrantStore) -> None:
     assert set(meta) == {pid, bare_pid}
     assert meta[pid]["last_modified"] == "2026-02-01T00:00:00+00:00"
     assert "ingested_at" in meta[pid]
+    assert "embedding_signature" in meta[pid]
     assert meta[bare_pid]["last_modified"] is None
 
     payload = _payload(store, occ.occurrence_id)

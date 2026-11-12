@@ -8,6 +8,7 @@ from events2rag.text_utils import (
     estimate_frequency,
     human_date,
     human_duration,
+    prepare_embedding_text,
     strip_html,
     temporal_status,
     truncate_for_embedding,
@@ -201,3 +202,14 @@ def test_estimate_frequency_is_order_independent() -> None:
         datetime(2026, 3, 8, tzinfo=UTC),
     ]
     assert estimate_frequency(times) == "weekly"
+
+
+def test_prepare_embedding_text_reserves_room_for_prefix() -> None:
+    result = prepare_embedding_text("word " * 100, "passage: ", max_tokens=20)
+    assert result.startswith("passage: ")
+    assert len(result) <= 20 * 3
+
+
+def test_prepare_embedding_text_without_prefix_just_truncates() -> None:
+    text = "word " * 100
+    assert prepare_embedding_text(text, "", 10) == truncate_for_embedding(text, 10)

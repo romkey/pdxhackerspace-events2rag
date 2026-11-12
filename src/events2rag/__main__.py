@@ -15,9 +15,10 @@ from types import FrameType
 from events2rag import __version__
 from events2rag.config import ConfigError, Settings
 from events2rag.embedder import (
-    Embedder,
+    EmbeddingBackend,
     OnnxEmbedder,
     OpenAIEmbedder,
+    PromptedEmbedder,
     SentenceTransformerEmbedder,
 )
 from events2rag.qdrant_store import QdrantStore
@@ -34,7 +35,21 @@ def configure_logging(level: str) -> None:
     )
 
 
-def build_embedder(settings: Settings) -> Embedder:
+def build_embedder(settings: Settings) -> PromptedEmbedder:
+    """The configured backend, with the configured prompt prefixes.
+
+    Other code can embed a search query the same way the stored events
+    were embedded: build_embedder(Settings.from_env()).embed([q], "query").
+    """
+    return PromptedEmbedder(
+        build_backend(settings),
+        query_prefix=settings.embedding_query_prefix,
+        document_prefix=settings.embedding_document_prefix,
+        max_tokens=settings.embedding_context_length,
+    )
+
+
+def build_backend(settings: Settings) -> EmbeddingBackend:
     backend = settings.embedding_backend
 
     if backend == "openai":
@@ -71,16 +86,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     configure_logging(settings.log_level)
     logger.info(
-        "events2rag %s starting (backend=%s, model=%s)",
+        "events2rag %s starting (backend=%s, model=%s, query prefix=%r, "
+        "document prefix=%r)",
         __version__,
         settings.embedding_backend,
         settings.embedding_model_name,
+        settings.embedding_query_prefix,
+        settings.embedding_document_prefix,
     )
     store = QdrantStore(
         url=settings.qdrant_url,
         api_key=settings.qdrant_api_key,
         collection_name=settings.qdrant_collection,
         distance_name=settings.qdrant_distance,
+        embedding_signature=settings.embedding_signature,
     )
     service = IngestionService(
         settings=settings, store=store, embedder=build_embedder(settings)

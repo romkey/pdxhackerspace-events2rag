@@ -30,11 +30,41 @@ An empty value means the default.
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `EMBEDDING_BACKEND` | `openai` | `openai`, `onnx` (needs the `onnx` extra) or `sentence-transformers` (needs the `torch` extra). The Docker image has only `openai`. |
-| `EMBEDDING_MODEL_NAME` | `text-embedding-3-small` | Model name: one the API at `OPENAI_BASE_URL` serves, or a Hugging Face repo for `onnx` and `sentence-transformers`. Changing it changes the vector size, so use a new `QDRANT_COLLECTION` (or drop the old one). |
+| `EMBEDDING_MODEL_NAME` | `nomic-ai/modernbert-embed-base` | Model name: one the API at `OPENAI_BASE_URL` serves, or a Hugging Face repo for `onnx` and `sentence-transformers`. Changing it changes the vector size, so use a new `QDRANT_COLLECTION` (or drop the old one). |
 | `EMBEDDING_BATCH_SIZE` | `64` | Texts per embedding request (1 or more) |
-| `EMBEDDING_CONTEXT_LENGTH` | `512` | The model's token limit; longer texts are truncated (1 or more) |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible API, for the `openai` backend: api.openai.com, or Ollama (`http://host:11434/v1`), vLLM, LM Studio |
+| `EMBEDDING_CONTEXT_LENGTH` | `512` | The model's token limit; longer texts are truncated, with the prefix counted (1 or more) |
+| `EMBEDDING_QUERY_PREFIX` | `search_query:` | Prompt prefix the model expects on search queries; see [Prompt prefixes](#prompt-prefixes). `none` for no prefix. |
+| `EMBEDDING_DOCUMENT_PREFIX` | `search_document:` | Prompt prefix the model expects on documents; events are embedded with it. `none` for no prefix. |
+| `OPENAI_BASE_URL` | `http://localhost:8080/v1` | OpenAI-compatible API, for the `openai` backend: a local server (text-embeddings-inference, vLLM, Ollama at `http://host:11434/v1`, LM Studio) or `https://api.openai.com/v1` |
 | `OPENAI_API_KEY` | none | Sent as a bearer token. Required for api.openai.com. Secret. |
+
+### Prompt prefixes
+
+Many embedding models were trained with a task prefix on search queries,
+on the documents being searched, or both, and retrieve noticeably worse
+without it. Set the two prefixes to match `EMBEDDING_MODEL_NAME`:
+
+| Model | `EMBEDDING_QUERY_PREFIX` | `EMBEDDING_DOCUMENT_PREFIX` |
+|-------|--------------------------|-----------------------------|
+| `nomic-ai/modernbert-embed-base` (default), `nomic-embed-text` | `search_query:` | `search_document:` |
+| e5 family (`intfloat/e5-*`, `multilingual-e5-*`) | `query:` | `passage:` |
+| `mxbai-embed-large` | `Represent this sentence for searching relevant passages:` | `none` |
+| Qwen3-Embedding and similar instruction models | an instruction line, e.g. `Instruct: Given a question, find matching events\nQuery:` | `none` |
+| OpenAI `text-embedding-3-*` | `none` | `none` |
+
+A space is added after a prefix unless it already ends in whitespace,
+and `\n` becomes a newline. An empty value means the default
+(the ModernBERT prefixes), so write `none` to send text without one.
+
+The ingester embeds events with the document prefix. Anything that
+searches the collection must embed its query with the same model and the
+query prefix; see the README's "Searching the collection".
+
+Each stored occurrence records the backend, model and document prefix it
+was embedded with. Changing any of them re-embeds every occurrence on the
+next cycle; event summaries are re-embedded every cycle anyway. The
+query prefix doesn't affect stored vectors, so changing it needs no
+re-embedding.
 
 ## Logging
 

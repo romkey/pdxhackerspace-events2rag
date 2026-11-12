@@ -1,19 +1,80 @@
+import logging
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 import requests
+
+from events2rag.text_utils import prepare_embedding_text
 
 if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
 
+logger = logging.getLogger(__name__)
 
-class Embedder(Protocol):
+type EmbedKind = Literal["query", "document"]
+
+
+class EmbeddingBackend(Protocol):
+    """A model: texts in, vectors out, sent exactly as given."""
+
     def embed(self, texts: Sequence[str]) -> list[list[float]]: ...
 
     @property
     def dimension(self) -> int: ...
+
+
+class Embedder(Protocol):
+    """Embeds texts as search queries or as documents to be searched."""
+
+    def embed(
+        self, texts: Sequence[str], kind: EmbedKind = "document"
+    ) -> list[list[float]]: ...
+
+    @property
+    def dimension(self) -> int: ...
+
+
+class PromptedEmbedder:
+    """A backend plus the prompt prefixes its model was trained with.
+
+    Many embedding models expect a task prefix on queries and/or documents
+    (nomic and ModernBERT: "search_query: " / "search_document: "; e5:
+    "query: " / "passage: ") and retrieve worse without it. Texts are
+    truncated to `max_tokens` with the prefix counted.
+    """
+
+    def __init__(
+        self,
+        backend: EmbeddingBackend,
+        query_prefix: str = "",
+        document_prefix: str = "",
+        max_tokens: int = 512,
+    ) -> None:
+        self._backend = backend
+        self._prefixes: dict[str, str] = {
+            "query": query_prefix,
+            "document": document_prefix,
+        }
+        self._max_tokens = max_tokens
+
+    def prepare(self, text: str, kind: EmbedKind = "document") -> str:
+        """The exact text sent to the model for `text`."""
+        if kind not in self._prefixes:
+            raise ValueError(f"Unknown embed kind: {kind!r}")
+        return prepare_embedding_text(
+            text, self._prefixes[kind], self._max_tokens, logger
+        )
+
+    def embed(
+        self, texts: Sequence[str], kind: EmbedKind = "document"
+    ) -> list[list[float]]:
+        return self._backend.embed([self.prepare(text, kind) for text in texts])
+
+    @property
+    def dimension(self) -> int:
+        return self._backend.dimension
 
 
 def _is_vector(value: object) -> bool:
@@ -52,14 +113,14 @@ def _parse_embeddings(data: object, count: int) -> list[list[float]]:
 class OpenAIEmbedder:
     """Embedding via the OpenAI /embeddings API.
 
-    Works against api.openai.com and any OpenAI-compatible server (Ollama's
-    /v1, vLLM, LM Studio) by changing base_url.
+    Works against a local OpenAI-compatible server (text-embeddings-inference,
+    vLLM, Ollama's /v1, LM Studio) or api.openai.com, chosen by base_url.
     """
 
     def __init__(
         self,
         model_name: str,
-        base_url: str = "https://api.openai.com/v1",
+        base_url: str = "http://localhost:8080/v1",
         api_key: str | None = None,
         timeout: int = 120,
     ) -> None:

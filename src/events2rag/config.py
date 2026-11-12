@@ -49,6 +49,21 @@ def _optional_url(name: str, text: str | None) -> str | None:
     return _url(name, text, "") or None
 
 
+def _prefix(text: str | None, default: str) -> str:
+    """An embedding prompt prefix, ready to prepend to text.
+
+    Empty means the default and "none" means no prefix. A literal \\n
+    becomes a newline (for instruction prompts), and a separating space is
+    added unless the prefix already ends in whitespace.
+    """
+    if text is None or text == "":
+        return default
+    if text.strip().lower() == "none":
+        return ""
+    text = text.replace("\\n", "\n")
+    return text if text[-1].isspace() else text + " "
+
+
 @dataclass(frozen=True)
 class Settings:
     events_json_url: str = "https://events.pdxhackerspace/events.json"
@@ -59,15 +74,34 @@ class Settings:
     qdrant_collection: str = "events"
     qdrant_distance: str = "Cosine"
     embedding_backend: str = "openai"
-    embedding_model_name: str = "text-embedding-3-small"
+    embedding_model_name: str = "nomic-ai/modernbert-embed-base"
     embedding_batch_size: int = 64
     embedding_context_length: int = 512
-    openai_base_url: str = "https://api.openai.com/v1"
+    embedding_query_prefix: str = "search_query: "
+    embedding_document_prefix: str = "search_document: "
+    openai_base_url: str = "http://localhost:8080/v1"
     openai_api_key: str | None = None
     ics_lookback_days: int = 30
     ics_lookahead_days: int = 365
     request_timeout_seconds: int = 30
     log_level: str = "INFO"
+
+    @property
+    def embedding_signature(self) -> str:
+        """Identifies how stored document vectors were made.
+
+        Stored with each occurrence; one whose signature differs from the
+        current one is re-embedded, so changing the backend, model or
+        document prefix refreshes the stored vectors. The query prefix
+        isn't part of it: it doesn't affect stored vectors.
+        """
+        return "|".join(
+            (
+                self.embedding_backend,
+                self.embedding_model_name,
+                self.embedding_document_prefix,
+            )
+        )
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] = os.environ) -> Settings:
@@ -115,6 +149,12 @@ class Settings:
                 env.get("EMBEDDING_CONTEXT_LENGTH"),
                 cls.embedding_context_length,
                 minimum=1,
+            ),
+            embedding_query_prefix=_prefix(
+                env.get("EMBEDDING_QUERY_PREFIX"), cls.embedding_query_prefix
+            ),
+            embedding_document_prefix=_prefix(
+                env.get("EMBEDDING_DOCUMENT_PREFIX"), cls.embedding_document_prefix
             ),
             openai_base_url=_url(
                 "OPENAI_BASE_URL", env.get("OPENAI_BASE_URL"), cls.openai_base_url

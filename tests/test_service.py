@@ -1,6 +1,6 @@
 import threading
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -8,6 +8,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from events2rag.config import Settings
+from events2rag.embedder import EmbedKind
 from events2rag.models import EventOccurrence, EventSummary
 from events2rag.qdrant_store import _to_point_id
 from events2rag.service import (
@@ -20,8 +21,12 @@ from events2rag.service import (
 @dataclass
 class FakeEmbedder:
     dimension: int = 3
+    kinds: list[str] = field(default_factory=list)
 
-    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+    def embed(
+        self, texts: Sequence[str], kind: EmbedKind = "document"
+    ) -> list[list[float]]:
+        self.kinds.append(kind)
         return [[float(len(text)), 1.0, 0.0] for text in texts]
 
 
@@ -300,11 +305,12 @@ def test_filter_changed_skips_unchanged_occurrences(mocker: MockerFixture) -> No
         occurrence_id="updated",
         last_modified=datetime(2026, 3, 1, tzinfo=UTC),
     )
+    signed = {"embedding_signature": Settings().embedding_signature}
     existing = {
-        _to_point_id("no-lm"): {"ingested_at": ingested.isoformat()},
-        _to_point_id("no-ingested"): {},
-        _to_point_id("stale"): {"ingested_at": ingested.isoformat()},
-        _to_point_id("updated"): {"ingested_at": ingested.isoformat()},
+        _to_point_id("no-lm"): {"ingested_at": ingested.isoformat(), **signed},
+        _to_point_id("no-ingested"): signed,
+        _to_point_id("stale"): {"ingested_at": ingested.isoformat(), **signed},
+        _to_point_id("updated"): {"ingested_at": ingested.isoformat(), **signed},
     }
     service = _service(MetadataStore(existing))
 
@@ -326,7 +332,12 @@ def test_run_cycle_with_nothing_changed_still_upserts_summaries(
     mocker.patch("events2rag.service.fetch_json", return_value=[])
     mocker.patch("events2rag.service.parse_event_occurrences", return_value=[occ])
     store = MetadataStore(
-        {_to_point_id("same"): {"ingested_at": "2026-01-01T00:00:00+00:00"}}
+        {
+            _to_point_id("same"): {
+                "ingested_at": "2026-01-01T00:00:00+00:00",
+                "embedding_signature": Settings().embedding_signature,
+            }
+        }
     )
 
     assert _service(store).run_cycle() == 1
@@ -367,25 +378,28 @@ def test_collect_occurrences_includes_ics_feed(mocker: MockerFixture) -> None:
     )
 
 
-def test_embed_batches_splits_and_truncates() -> None:
+def test_embed_batches_splits_into_document_batches() -> None:
     calls: list[list[str]] = []
 
     class RecordingEmbedder(FakeEmbedder):
-        def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        def embed(
+            self, texts: Sequence[str], kind: EmbedKind = "document"
+        ) -> list[list[float]]:
             calls.append(list(texts))
-            return super().embed(texts)
+            return super().embed(texts, kind)
 
+    embedder = RecordingEmbedder()
     service = IngestionService(
-        settings=Settings(embedding_batch_size=2, embedding_context_length=2),
+        settings=Settings(embedding_batch_size=2),
         store=FakeStore(),
-        embedder=RecordingEmbedder(),
+        embedder=embedder,
     )
 
-    vectors = service._embed_batches(["a", "b", "c", "word " * 10])
+    vectors = service._embed_batches(["a", "b", "c", "d"])
 
     assert len(vectors) == 4
-    assert [len(batch) for batch in calls] == [2, 2]
-    assert len(calls[1][1]) <= 6
+    assert calls == [["a", "b"], ["c", "d"]]
+    assert embedder.kinds == ["document", "document"]
 
 
 def test_cross_source_dedup_keeps_first_non_json() -> None:
@@ -407,3 +421,31 @@ def test_next_occurrence_start_prefers_future_else_latest() -> None:
         _next_occurrence_start([past_a, future_a, future_b], now) == future_b.start_time
     )
     assert _next_occurrence_start([], now) is None
+
+
+def test_filter_changed_reembeds_when_signature_differs() -> None:
+    last_modified = datetime(2026, 1, 1, tzinfo=UTC)
+    ingested = "2026-02-01T00:00:00+00:00"
+    old = Settings(embedding_document_prefix="passage: ").embedding_signature
+    current = Settings().embedding_signature
+    existing = {
+        _to_point_id("same"): {
+            "ingested_at": ingested,
+            "embedding_signature": current,
+        },
+        _to_point_id("old-prefix"): {
+            "ingested_at": ingested,
+            "embedding_signature": old,
+        },
+        _to_point_id("unsigned"): {"ingested_at": ingested},
+    }
+    service = _service(MetadataStore(existing))
+
+    changed = service._filter_changed(
+        [
+            _occ(occurrence_id=pid, last_modified=last_modified)
+            for pid in ("same", "old-prefix", "unsigned")
+        ]
+    )
+
+    assert [o.occurrence_id for o in changed] == ["old-prefix", "unsigned"]

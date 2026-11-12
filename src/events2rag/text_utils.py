@@ -108,6 +108,23 @@ def truncate_for_embedding(
     return truncated
 
 
+def prepare_embedding_text(
+    text: str,
+    prefix: str,
+    max_tokens: int,
+    logger: logging.Logger | None = None,
+) -> str:
+    """Prepend `prefix` to `text`, truncating to fit `max_tokens` in all.
+
+    The prefix counts toward the budget: the text gets what's left.
+    """
+    if not prefix:
+        return truncate_for_embedding(text, max_tokens, logger)
+    prefix_tokens = -(-len(prefix) // _CHARS_PER_TOKEN)  # rounded up
+    remaining = max(1, max_tokens - prefix_tokens)
+    return prefix + truncate_for_embedding(text, remaining, logger)
+
+
 _WHITESPACE_RE = re.compile(r"\s+")
 
 

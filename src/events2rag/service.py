@@ -15,7 +15,6 @@ from events2rag.text_utils import (
     estimate_frequency,
     human_duration,
     temporal_status,
-    truncate_for_embedding,
 )
 
 logger = logging.getLogger(__name__)
@@ -100,14 +99,19 @@ class IngestionService:
     def _filter_changed(
         self, occurrences: list[EventOccurrence]
     ) -> list[EventOccurrence]:
-        """Skip re-embedding occurrences whose last_modified hasn't changed."""
+        """The occurrences that need embedding.
+
+        That's those that are new, modified since they were ingested, or
+        embedded differently (another backend, model or document prefix).
+        """
+        signature = self._settings.embedding_signature
         point_ids = [_to_point_id(occ.occurrence_id) for occ in occurrences]
         existing = self._store.get_existing_metadata(point_ids)
 
         changed: list[EventOccurrence] = []
         for occ, pid in zip(occurrences, point_ids, strict=True):
             meta = existing.get(pid)
-            if meta is None:
+            if meta is None or meta.get("embedding_signature") != signature:
                 changed.append(occ)
                 continue
             if occ.last_modified is None:
@@ -150,13 +154,11 @@ class IngestionService:
         return occurrences
 
     def _embed_batches(self, texts: list[str]) -> list[list[float]]:
-        max_tokens = self._settings.embedding_context_length
-        safe_texts = [truncate_for_embedding(t, max_tokens, logger) for t in texts]
         vectors: list[list[float]] = []
         batch_size = max(1, self._settings.embedding_batch_size)
-        for index in range(0, len(safe_texts), batch_size):
-            batch = safe_texts[index : index + batch_size]
-            vectors.extend(self._embedder.embed(batch))
+        for index in range(0, len(texts), batch_size):
+            batch = texts[index : index + batch_size]
+            vectors.extend(self._embedder.embed(batch, "document"))
         return vectors
 
 
