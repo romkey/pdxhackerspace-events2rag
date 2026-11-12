@@ -23,7 +23,7 @@ hackerspace?" from current data.
 | `src/events2rag/json_feed.py` | Fetches the JSON feed and turns events into occurrences |
 | `src/events2rag/ics_feed.py` | Fetches the ICS feed and expands recurring events |
 | `src/events2rag/service.py` | One ingestion cycle: dedupe, enrich, skip unchanged, embed, upsert; the polling loop |
-| `src/events2rag/embedder.py` | Embedding backends: Ollama, ONNX Runtime, sentence-transformers |
+| `src/events2rag/embedder.py` | Embedding backends: OpenAI API, ONNX Runtime, sentence-transformers |
 | `src/events2rag/qdrant_store.py` | Qdrant collection, payload indexes and upserts |
 | `src/events2rag/models.py` | `EventOccurrence` and `EventSummary`, and the text that gets embedded |
 | `src/events2rag/text_utils.py`, `datetime_utils.py` | HTML stripping, human-friendly dates and durations, frequency estimates |
@@ -59,11 +59,13 @@ Embedding backends, chosen with `EMBEDDING_BACKEND`:
 
 | Backend | Install | What it does |
 |---------|---------|--------------|
-| `ollama` (default) | included | Calls an Ollama server's `/api/embed` |
+| `openai` (default) | included | Calls the OpenAI embeddings API, or any OpenAI-compatible server (Ollama, vLLM, LM Studio) |
 | `onnx` | `pip install 'events2rag[onnx]'` | Runs the model in-process with ONNX Runtime |
 | `sentence-transformers` | `pip install 'events2rag[torch]'` | Runs the model with PyTorch |
 
-The Docker image includes only the Ollama backend.
+The Docker image includes only the `openai` backend. Changing the model
+changes the vector size, so point `QDRANT_COLLECTION` at a new collection
+(or drop the old one) when you switch.
 
 ```
 events2rag [--version]
@@ -71,20 +73,21 @@ events2rag [--version]
 
 ## Running it
 
-Requires Docker, and an Ollama server with the embedding model pulled
-(`ollama pull qllama/bge-small-en-v1.5`). Configuration comes from
+Requires Docker, and either an OpenAI API key or a local
+OpenAI-compatible server such as Ollama. Configuration comes from
 environment variables, kept in `.env` (see
 [docs/configuration.md](docs/configuration.md)):
 
 ```bash
-cp .env.example .env   # then edit it: at least EVENTS_JSON_URL and OLLAMA_URL
+cp .env.example .env   # then edit it: at least OPENAI_API_KEY
 docker compose -f docker-compose.prod.yaml up -d
 ```
 
 That runs the latest release from `ghcr.io/romkey/pdxhackerspace-events2rag`
-next to a Qdrant container; set `APP_VERSION=X.Y.Z` to pin a release. If
-Ollama runs on the Docker host, set
-`OLLAMA_URL=http://host.docker.internal:11434`.
+next to a Qdrant container; set `APP_VERSION=X.Y.Z` to pin a release. To
+use Ollama on the Docker host instead of OpenAI, set
+`OPENAI_BASE_URL=http://host.docker.internal:11434/v1`, leave
+`OPENAI_API_KEY` unset, and set `EMBEDDING_MODEL_NAME` to a model it serves.
 
 ### With pip
 

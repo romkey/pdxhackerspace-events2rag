@@ -14,7 +14,7 @@ An empty value means the default.
 | `ICS_LOOKBACK_DAYS` | `30` | How far back to expand ICS recurrences, in days (0 or more) |
 | `ICS_LOOKAHEAD_DAYS` | `365` | How far ahead to expand ICS recurrences, in days (0 or more) |
 | `POLL_INTERVAL_SECONDS` | `3600` | Time between ingestion cycles (1 or more) |
-| `REQUEST_TIMEOUT_SECONDS` | `30` | Timeout for feed and Ollama requests (1 or more) |
+| `REQUEST_TIMEOUT_SECONDS` | `30` | Timeout for feed and embeddings API requests (1 or more) |
 
 ## Qdrant
 
@@ -29,12 +29,12 @@ An empty value means the default.
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `EMBEDDING_BACKEND` | `ollama` | `ollama`, `onnx` (needs the `onnx` extra) or `sentence-transformers` (needs the `torch` extra). The Docker image has only `ollama`. |
-| `EMBEDDING_MODEL_NAME` | `qllama/bge-small-en-v1.5` | Model name: an Ollama model, or a Hugging Face repo for `onnx` and `sentence-transformers` |
+| `EMBEDDING_BACKEND` | `openai` | `openai`, `onnx` (needs the `onnx` extra) or `sentence-transformers` (needs the `torch` extra). The Docker image has only `openai`. |
+| `EMBEDDING_MODEL_NAME` | `text-embedding-3-small` | Model name: one the API at `OPENAI_BASE_URL` serves, or a Hugging Face repo for `onnx` and `sentence-transformers`. Changing it changes the vector size, so use a new `QDRANT_COLLECTION` (or drop the old one). |
 | `EMBEDDING_BATCH_SIZE` | `64` | Texts per embedding request (1 or more) |
 | `EMBEDDING_CONTEXT_LENGTH` | `512` | The model's token limit; longer texts are truncated (1 or more) |
-| `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint, for the `ollama` backend |
-| `OLLAMA_API_KEY` | none | Bearer token for hosted or proxied Ollama-compatible APIs. Secret. |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible API, for the `openai` backend: api.openai.com, or Ollama (`http://host:11434/v1`), vLLM, LM Studio |
+| `OPENAI_API_KEY` | none | Sent as a bearer token. Required for api.openai.com. Secret. |
 
 ## Logging
 

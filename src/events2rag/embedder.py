@@ -16,59 +16,75 @@ class Embedder(Protocol):
     def dimension(self) -> int: ...
 
 
-def _parse_embeddings(data: object) -> list[list[float]]:
-    """The vectors from an Ollama /api/embed response.
+def _is_vector(value: object) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(x, int | float) and not isinstance(x, bool) for x in value
+    )
 
-    Ollama returns {"embeddings": [[...], ...]}; older versions used
-    "embedding". https://github.com/ollama/ollama/blob/main/docs/api.md
+
+def _parse_embeddings(data: object, count: int) -> list[list[float]]:
+    """The vectors from an OpenAI /embeddings response, in input order.
+
+    The response is {"data": [{"index": 0, "embedding": [...]}, ...]};
+    https://platform.openai.com/docs/api-reference/embeddings/object
     """
     if not isinstance(data, dict):
-        raise ValueError(f"Ollama returned {type(data).__name__}, not an object")
-    key = "embeddings" if "embeddings" in data else "embedding"
-    embeddings = data.get(key)
-    if not isinstance(embeddings, list) or not all(
-        isinstance(vector, list) and all(isinstance(x, int | float) for x in vector)
-        for vector in embeddings
+        raise ValueError(
+            f"Embeddings API returned {type(data).__name__}, not an object"
+        )
+    items = data.get("data")
+    if not isinstance(items, list) or not all(
+        isinstance(item, dict)
+        and isinstance(item.get("index", 0), int)
+        and _is_vector(item.get("embedding"))
+        and item.get("embedding")
+        for item in items
     ):
-        raise ValueError("Ollama returned embeddings that aren't lists of numbers")
-    return [[float(x) for x in vector] for vector in embeddings]
+        raise ValueError("Embeddings API returned data that isn't a list of embeddings")
+    if len(items) != count:
+        raise ValueError(
+            f"Embeddings API returned {len(items)} embeddings for {count} inputs"
+        )
+    items = sorted(items, key=lambda item: item.get("index", 0))
+    return [[float(x) for x in item["embedding"]] for item in items]
 
 
-class OllamaEmbedder:
-    """Embedding via Ollama's /api/embed endpoint."""
+class OpenAIEmbedder:
+    """Embedding via the OpenAI /embeddings API.
+
+    Works against api.openai.com and any OpenAI-compatible server (Ollama's
+    /v1, vLLM, LM Studio) by changing base_url.
+    """
 
     def __init__(
         self,
         model_name: str,
-        ollama_url: str = "http://ollama:11434",
+        base_url: str = "https://api.openai.com/v1",
         api_key: str | None = None,
         timeout: int = 120,
     ) -> None:
         self._model_name = model_name
-        self._url = ollama_url.rstrip("/") + "/api/embed"
+        self._url = base_url.rstrip("/") + "/embeddings"
         self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
         self._timeout = timeout
-        self._dimension = self._probe_dimension()
+        self._dimension = len(self._request(["hello"])[0])
 
-    def _request(self, texts: str | list[str]) -> list[list[float]]:
+    def _request(self, texts: list[str]) -> list[list[float]]:
         response = requests.post(
             self._url,
-            json={"model": self._model_name, "input": texts, "truncate": True},
+            json={"model": self._model_name, "input": texts},
             headers=self._headers,
             timeout=self._timeout,
         )
         response.raise_for_status()
-        return _parse_embeddings(response.json())
-
-    def _probe_dimension(self) -> int:
-        embeddings = self._request("hello")
-        if not embeddings or not embeddings[0]:
-            raise ValueError(
-                f"Ollama returned no embeddings for model {self._model_name}"
-            )
-        return len(embeddings[0])
+        try:
+            return _parse_embeddings(response.json(), len(texts))
+        except ValueError as error:
+            raise ValueError(f"{error} (model {self._model_name})") from error
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        if not texts:
+            return []
         return self._request(list(texts))
 
     @property
@@ -80,7 +96,7 @@ class OnnxEmbedder:
     """Lightweight embedder using ONNX Runtime + HuggingFace tokenizers.
 
     Needs the `onnx` extra; its imports are deferred so the base install
-    (Ollama only) doesn't need numpy or onnxruntime.
+    (OpenAI-compatible API only) doesn't need numpy or onnxruntime.
     """
 
     def __init__(self, model_name: str, max_length: int = 512) -> None:

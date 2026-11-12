@@ -9,8 +9,8 @@ import requests
 from numpy.typing import NDArray
 
 from events2rag.embedder import (
-    OllamaEmbedder,
     OnnxEmbedder,
+    OpenAIEmbedder,
     SentenceTransformerEmbedder,
     _mean_pool,
 )
@@ -50,85 +50,121 @@ def fake_post(calls: list[Call], reply: Callable[[Any], Any]) -> Post:
     return post
 
 
+def _payload(vectors: list[list[float]]) -> dict[str, Any]:
+    return {
+        "object": "list",
+        "data": [
+            {"object": "embedding", "index": i, "embedding": vector}
+            for i, vector in enumerate(vectors)
+        ],
+    }
+
+
 def _vectors_for(body: Any) -> Any:
-    count = 1 if isinstance(body["input"], str) else len(body["input"])
-    return {"embeddings": [[0.1, 0.2, 0.3]] * count}
+    return _payload([[0.1, 0.2, 0.3]] * len(body["input"]))
 
 
-def test_ollama_embedder_probe_and_embed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_openai_embedder_probe_and_embed(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[Call] = []
     monkeypatch.setattr(requests, "post", fake_post(calls, _vectors_for))
 
-    embedder = OllamaEmbedder(
-        model_name="test-model", ollama_url="http://localhost:11434/", timeout=7
-    )
+    embedder = OpenAIEmbedder(model_name="test-model", timeout=7)
 
     assert embedder.dimension == 3
     vectors = embedder.embed(["hello", "world"])
     assert vectors == [[0.1, 0.2, 0.3]] * 2
-    assert calls[0]["url"] == "http://localhost:11434/api/embed"
-    assert calls[0]["json"] == {
-        "model": "test-model",
-        "input": "hello",
-        "truncate": True,
-    }
+    assert calls[0]["url"] == "https://api.openai.com/v1/embeddings"
+    assert calls[0]["json"] == {"model": "test-model", "input": ["hello"]}
     assert calls[1]["json"]["input"] == ["hello", "world"]
     assert calls[1]["headers"] is None
     assert calls[1]["timeout"] == 7
 
 
-def test_ollama_embedder_sends_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_openai_embedder_uses_custom_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[Call] = []
     monkeypatch.setattr(requests, "post", fake_post(calls, _vectors_for))
 
-    OllamaEmbedder(model_name="m", api_key="secret-token").embed(["hello"])
+    OpenAIEmbedder(model_name="m", base_url="http://myhost:9999/v1/")
+
+    assert calls[0]["url"] == "http://myhost:9999/v1/embeddings"
+
+
+def test_openai_embedder_sends_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[Call] = []
+    monkeypatch.setattr(requests, "post", fake_post(calls, _vectors_for))
+
+    OpenAIEmbedder(model_name="m", api_key="secret-token").embed(["hello"])
 
     assert [c["headers"] for c in calls] == [
         {"Authorization": "Bearer secret-token"}
     ] * 2
 
 
-def test_ollama_embedder_accepts_legacy_embedding_key(
+def test_openai_embedder_orders_by_index(monkeypatch: pytest.MonkeyPatch) -> None:
+    def reply(body: Any) -> Any:
+        if len(body["input"]) == 1:
+            return _payload([[0.0, 0.0]])
+        return {
+            "data": [
+                {"index": 1, "embedding": [2, 2.5]},
+                {"index": 0, "embedding": [1.0, 1.0]},
+            ]
+        }
+
+    monkeypatch.setattr(requests, "post", fake_post([], reply))
+
+    embedder = OpenAIEmbedder(model_name="m")
+
+    assert embedder.embed(["a", "b"]) == [[1.0, 1.0], [2.0, 2.5]]
+
+
+def test_openai_embedder_rejects_short_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        requests, "post", fake_post([], lambda _: {"embedding": [[1, 0.5]]})
+        requests, "post", fake_post([], lambda _: _payload([[0.0, 0.0]]))
     )
+    embedder = OpenAIEmbedder(model_name="m")
 
-    embedder = OllamaEmbedder(model_name="m")
-
-    assert embedder.dimension == 2
-    assert embedder.embed(["x"]) == [[1.0, 0.5]]
+    with pytest.raises(ValueError, match="returned 1 embeddings for 2 inputs"):
+        embedder.embed(["a", "b"])
 
 
-def test_ollama_embedder_raises_when_no_embeddings(
+def test_openai_embedder_empty_input_skips_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(requests, "post", fake_post([], lambda _: {"embeddings": []}))
+    calls: list[Call] = []
+    monkeypatch.setattr(requests, "post", fake_post(calls, _vectors_for))
+    embedder = OpenAIEmbedder(model_name="m")
 
-    with pytest.raises(ValueError, match="no embeddings for model missing-model"):
-        OllamaEmbedder(model_name="missing-model")
+    assert embedder.embed([]) == []
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize(
     ("body", "message"),
     [
         (["not", "an", "object"], "returned list, not an object"),
-        ({}, "aren't lists of numbers"),
-        ({"embeddings": [["a"]]}, "aren't lists of numbers"),
-        ({"embeddings": "nope"}, "aren't lists of numbers"),
+        ({}, "isn't a list of embeddings"),
+        ({"data": "nope"}, "isn't a list of embeddings"),
+        ({"data": ["nope"]}, "isn't a list of embeddings"),
+        ({"data": [{"index": 0, "embedding": ["a"]}]}, "isn't a list of embeddings"),
+        ({"data": [{"index": 0, "embedding": [True]}]}, "isn't a list of embeddings"),
+        ({"data": [{"index": 0, "embedding": []}]}, "isn't a list of embeddings"),
+        ({"data": [{"index": "0", "embedding": [1.0]}]}, "isn't a list of embeddings"),
+        ({"data": []}, "returned 0 embeddings for 1 inputs"),
     ],
 )
-def test_ollama_embedder_rejects_malformed_responses(
+def test_openai_embedder_rejects_malformed_responses(
     monkeypatch: pytest.MonkeyPatch, body: Any, message: str
 ) -> None:
     monkeypatch.setattr(requests, "post", fake_post([], lambda _: body))
 
-    with pytest.raises(ValueError, match=message):
-        OllamaEmbedder(model_name="m")
+    with pytest.raises(ValueError, match=rf"{message}.*\(model m\)"):
+        OpenAIEmbedder(model_name="m")
 
 
-def test_ollama_embedder_propagates_http_errors(
+def test_openai_embedder_propagates_http_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def post(*_args: object, **_kwargs: object) -> FakeResponse:
@@ -137,7 +173,7 @@ def test_ollama_embedder_propagates_http_errors(
     monkeypatch.setattr(requests, "post", post)
 
     with pytest.raises(requests.HTTPError):
-        OllamaEmbedder(model_name="m")
+        OpenAIEmbedder(model_name="m")
 
 
 class _FakeEncoding:

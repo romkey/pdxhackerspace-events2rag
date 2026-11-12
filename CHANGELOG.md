@@ -9,11 +9,18 @@ file.
 
 ### Added
 
+- **The `openai` embedding backend** replaces `ollama` and is the default.
+  It calls `POST {OPENAI_BASE_URL}/embeddings`, so it works with
+  api.openai.com and any OpenAI-compatible server (Ollama's `/v1`, vLLM,
+  LM Studio). `OPENAI_BASE_URL` and `OPENAI_API_KEY` replace `OLLAMA_URL`
+  and `OLLAMA_API_KEY`; the default model is `text-embedding-3-small`.
+  Switching models changes the vector size: use a new `QDRANT_COLLECTION`.
 - `events2rag --version`, and a clean shutdown on SIGTERM (`docker stop`):
   the current cycle finishes and the process exits instead of being killed.
 - Every setting is validated at startup; a bad value exits with status 2
   and a message naming the variable.
-- Ollama responses are checked to be lists of numbers.
+- Embeddings API responses are checked: one vector of numbers per input,
+  returned in input order.
 - Tests for every module (99% coverage, enforced at 95%), strict mypy,
   and pre-commit checks for lint, formatting, YAML, workflows, the
   Dockerfile, shell scripts and secrets.
@@ -29,7 +36,7 @@ file.
   Debian trixie. Python 3.15 waits for onnxruntime wheels.
 - **Invalid settings now stop the app** where they used to be accepted:
   an unknown `QDRANT_DISTANCE` (was silently Cosine), a non-URL
-  `QDRANT_URL`/`OLLAMA_URL`/feed URL, a zero or negative interval, batch
+  `QDRANT_URL`/`OPENAI_BASE_URL`/feed URL, a zero or negative interval, batch
   size, context length or timeout, and an unknown `LOG_LEVEL`. Empty
   values now mean "use the default".
 - The production image runs as a non-root user (uid 10001), and the
@@ -37,8 +44,7 @@ file.
 - Compose files follow the new layout: `docker-compose.yaml` (development,
   with Qdrant), `.test.yaml`, `.lint.yaml` and `.prod.yaml`. They replace
   `docker-compose.yml` and `docker-compose.dev.yml`; the service is now
-  `app` (was `ingester`). The development compose file no longer
-  overrides `OLLAMA_URL` from `.env`.
+  `app` (was `ingester`).
 - Image tags: before 1.0.0, releases no longer move the major tag (`0`);
   use `X.Y.Z`, `X.Y` or `latest`.
 - Development uses uv with a committed `uv.lock`; dev tools are in the

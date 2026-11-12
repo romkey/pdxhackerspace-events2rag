@@ -1,7 +1,7 @@
 # Tests, as CI runs them: pytest with coverage against your working tree.
 #
 #   docker compose -f docker-compose.test.yaml run --rm test
-#   docker compose -f docker-compose.test.yaml run --rm test pytest -k ollama
+#   docker compose -f docker-compose.test.yaml run --rm test pytest -k openai
 #
 # The working tree is mounted, so code changes need no rebuild; dependency
 # changes are synced from uv.lock on each run.

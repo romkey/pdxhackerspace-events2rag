@@ -3,7 +3,8 @@
 **What:** polls event feeds (JSON, optional ICS), embeds events and their
 occurrences, and upserts them into Qdrant for RAG.
 **Runs as:** a long-running worker (`events2rag`); no listening port.
-**Talks to:** the feed URLs, Qdrant, and Ollama (or an in-process model).
+**Talks to:** the feed URLs, Qdrant, and an OpenAI-compatible embeddings API (or an
+in-process model).
 
 ## Files
 
@@ -11,7 +12,7 @@ occurrences, and upserts them into Qdrant for RAG.
 - `src/events2rag/config.py`: validated `Settings` from environment variables.
 - `src/events2rag/service.py`: `IngestionService`: one cycle, and the polling loop.
 - `src/events2rag/json_feed.py`, `ics_feed.py`: fetch and parse the feeds.
-- `src/events2rag/embedder.py`: `Embedder` protocol; Ollama, ONNX, sentence-transformers.
+- `src/events2rag/embedder.py`: `Embedder` protocol; OpenAI API, ONNX, sentence-transformers.
 - `src/events2rag/qdrant_store.py`: collection, payload indexes, upserts.
 - `src/events2rag/models.py`: `EventOccurrence`, `EventSummary`, embedding text.
 - `src/events2rag/text_utils.py`, `datetime_utils.py`: pure helpers.

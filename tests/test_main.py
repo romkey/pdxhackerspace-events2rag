@@ -43,13 +43,13 @@ def test_configure_logging_sets_level(mocker: MockerFixture) -> None:
     assert basic_config.call_args.kwargs["level"] == "DEBUG"
 
 
-def test_build_embedder_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cli, "OllamaEmbedder", Recorder)
+def test_build_embedder_openai(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli, "OpenAIEmbedder", Recorder)
     settings = Settings(
-        embedding_backend="ollama",
+        embedding_backend="openai",
         embedding_model_name="m",
-        ollama_url="http://o:1",
-        ollama_api_key="k",
+        openai_base_url="http://o:1/v1",
+        openai_api_key="k",
         request_timeout_seconds=9,
     )
 
@@ -58,7 +58,7 @@ def test_build_embedder_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
     assert isinstance(result, Recorder)
     assert result.kwargs == {
         "model_name": "m",
-        "ollama_url": "http://o:1",
+        "base_url": "http://o:1/v1",
         "api_key": "k",
         "timeout": 9,
     }
