@@ -7,6 +7,8 @@ file.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-14
+
 ### Fixed
 
 - Releases publish again: the release workflow no longer fails pushing
