@@ -244,7 +244,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # The run that publishes a merged release PR is a pull_request
+          # event for a closed PR, whose cache token is read-only; a cache
+          # that can't be saved mustn't fail the release.
+          cache-to: type=gha,mode=max,ignore-error=true
           provenance: mode=max
           sbom: true
 
