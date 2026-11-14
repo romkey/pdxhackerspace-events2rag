@@ -7,6 +7,13 @@ file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Releases publish again: the release workflow no longer fails pushing
+  the image when it can't save the build cache, which it can't on the run
+  for a merged release PR. v0.6.0 was tagged but its image and GitHub
+  Release weren't published because of this.
+
 ## [0.6.0] - 2026-11-14
 
 ### Added
